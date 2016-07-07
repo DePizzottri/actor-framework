@@ -6,6 +6,20 @@ if(APPLE AND NOT DEFINED CMAKE_MACOSX_RPATH)
   set(CMAKE_MACOSX_RPATH true)
 endif()
 
+# shared libs currently not supported on Windows
+if(WIN32 AND NOT CAF_BUILD_STATIC_ONLY)
+  message(STATUS "CAF currently only supports static-only builds on Windows")
+  set(CAF_BUILD_STATIC_ONLY yes)
+endif()
+
+################################################################################
+#                        set prefix paths if available                         #
+################################################################################
+
+if(DEFINED CAF_QT_PREFIX_PATH)
+  set(CMAKE_PREFIX_PATH "${CAF_QT_PREFIX_PATH}")
+endif()
+
 ################################################################################
 #   make sure all variables are set to "no" if undefined for summary output    #
 ################################################################################
@@ -13,22 +27,45 @@ endif()
 if(NOT CAF_ENABLE_RUNTIME_CHECKS)
   set(CAF_ENABLE_RUNTIME_CHECKS no)
 endif()
+
 if(NOT CAF_NO_MEM_MANAGEMENT)
   set(CAF_NO_MEM_MANAGEMENT no)
 endif()
+
+if(NOT CAF_NO_EXCEPTIONS)
+  set(CAF_NO_EXCEPTIONS no)
+endif()
+
 if(NOT CAF_BUILD_STATIC_ONLY)
   set(CAF_BUILD_STATIC_ONLY no)
 endif()
+
 if(NOT CAF_BUILD_STATIC)
   set(CAF_BUILD_STATIC no)
 endif()
+
 if(NOT CAF_NO_OPENCL)
   set(CAF_NO_OPENCL no)
 endif()
+
+if(NOT CAF_NO_PYTHON)
+  set(CAF_NO_PYTHON no)
+endif()
+
+if(NOT CAF_NO_TOOLS)
+  set(CAF_NO_TOOLS no)
+endif()
+
 if(NOT CAF_NO_SUMMARY)
   set(CAF_NO_SUMMARY no)
 endif()
 
+if(NOT CAF_NO_IO)
+  set(CAF_NO_IO no)
+else()
+  set(CAF_NO_TOOLS yes)
+  set(CAF_NO_PYTHON yes)
+endif()
 
 ################################################################################
 #                              get version of CAF                              #
@@ -109,7 +146,7 @@ set(EXTRA_FLAGS "")
 # increase max. template depth on GCC and Clang
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"
    OR "${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-  set(EXTRA_FLAGS "-ftemplate-depth=512")
+  set(EXTRA_FLAGS "-ftemplate-depth=512 -ftemplate-backtrace-limit=0")
 endif()
 # add "-Werror" flag if --pedantic-build is used
 if(CAF_CXX_WARNINGS_AS_ERRORS)
@@ -242,26 +279,6 @@ endif()
 # needed by subprojects
 set(LD_FLAGS ${LD_FLAGS} ${CMAKE_LD_LIBS})
 
-
-################################################################################
-#                    check for biicode build pipeline                          #
-################################################################################
-IF(BIICODE)
-  # define the biicode target and let it do its thing
-  ADD_BII_TARGETS()
-
-  # but first specify the compiled/linker options calculated above
-  string(REPLACE " " ";" REPLACED_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  target_compile_options(${BII_BLOCK_TARGET} INTERFACE ${REPLACED_CXX_FLAGS})
-
-  IF (LD_FLAGS STREQUAL "")
-    string(REPLACE " " ";" REPLACED_LD_FLAGS ${LD_FLAGS})
-    target_link_libraries(${BII_BLOCK_TARGET} INTERFACE ${REPLACED_LD_FLAGS})
-  ENDIF()
-
-  RETURN()
-ENDIF()
-
 ################################################################################
 #                       configure build_config.hpp header                      #
 ################################################################################
@@ -279,7 +296,9 @@ macro(to_int_value name)
     set(${name}_INT -1)
   endif()
 endmacro()
+
 to_int_value(CAF_LOG_LEVEL)
+to_int_value(CAF_NO_EXCEPTIONS)
 to_int_value(CAF_NO_MEM_MANAGEMENT)
 to_int_value(CAF_ENABLE_RUNTIME_CHECKS)
 
@@ -387,7 +406,7 @@ macro(add_caf_lib name)
     set(${lib_varname_static} ${static_target})
   endif()
   add_unit_tests("${full_name}/test/*.cpp")
-  # add headers to include directories so other subprojects can use RIAC
+  # add headers to include directories so other subprojects can use them
   include_directories("${CMAKE_CURRENT_SOURCE_DIR}/libcaf_${name}")
 endmacro()
 
@@ -429,7 +448,7 @@ endmacro()
 
 # build core and I/O library
 add_caf_lib(core)
-add_caf_lib(io)
+add_optional_caf_lib(io)
 
 # build opencl library if not told otherwise and OpenCL package was found
 if(NOT CAF_NO_OPENCL)
@@ -440,17 +459,16 @@ if(NOT CAF_NO_OPENCL)
   endif()
 endif()
 
-# build RIAC library if not being told otherwise
-add_optional_caf_lib(riac)
+# build Python binding if not being told otherwise
+if(NOT CAF_NO_PYTHON AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_python/CMakeLists.txt")
+  add_subdirectory(libcaf_python)
+endif()
 
 # build examples if not being told otherwise
 add_optional_caf_binaries(examples)
 
-# build nexus if not being told otherwise
-add_optional_caf_binaries(nexus CAF_NO_RIAC)
-
-# build cash if not being told otherwise
-add_optional_caf_binaries(cash CAF_NO_RIAC)
+# build tools if not being told otherwise
+add_optional_caf_binaries(tools)
 
 # build benchmarks if not being told otherwise
 add_optional_caf_binaries(benchmarks)
@@ -492,7 +510,7 @@ if(NOT CAF_NO_UNIT_TESTS)
     # add some extra unit testing options when testing ASIO as well
     if(CAF_USE_ASIO AND "${suite}" MATCHES "^io_.+$")
       add_test(${test_name}_asio ${caf_test} -n -v 5 -s
-               "${suite}" ${ARGN} -- --use-asio)
+               "${suite}" ${ARGN} -- "--caf#middleman.network-backend=asio")
     endif()
   endmacro ()
   list(LENGTH suites num_suites)
@@ -501,15 +519,6 @@ if(NOT CAF_NO_UNIT_TESTS)
     make_test("${suite}")
   endforeach ()
 endif()
-
-
-################################################################################
-#                                 LateX setup                                  #
-################################################################################
-
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/manual/variables.tex.in"
-               "${CMAKE_CURRENT_SOURCE_DIR}/manual/variables.tex"
-               @ONLY)
 
 
 ################################################################################
@@ -529,6 +538,49 @@ if(DOXYGEN_FOUND)
                     VERBATIM)
 endif(DOXYGEN_FOUND)
 
+################################################################################
+#                                Manual setup                                  #
+################################################################################
+
+set(MANUAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/manual")
+if(EXISTS "${MANUAL_DIR}"
+   AND EXISTS "${MANUAL_DIR}/variables.tex.in"
+   AND EXISTS "${MANUAL_DIR}/conf.py.in")
+  # retrieve current branch name
+  execute_process(COMMAND git rev-parse --abbrev-ref HEAD
+                  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                  OUTPUT_VARIABLE GIT_BRANCH
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  # retrieve current SHA1 hash
+  execute_process(COMMAND git log --pretty=format:%h -n 1
+                  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                  OUTPUT_VARIABLE GIT_HASH
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(${GIT_BRANCH} STREQUAL "master")
+    # retrieve current tag name
+    execute_process(COMMAND git describe --tags --contains ${GIT_HASH}
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                    RESULT_VARIABLE GIT_TAG_RES
+                    OUTPUT_VARIABLE GIT_TAG
+                    ERROR_QUIET
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # prefer tag name over regular version
+    if("${GIT_TAG_RES}" STREQUAL "0")
+      set(CAF_RELEASE "${GIT_TAG}")
+    else()
+      set(CAF_RELEASE "${CAF_VERSION}")
+    endif()
+  else()
+    set(CAF_RELEASE "${CAF_VERSION}+exp.sha.${GIT_HASH}")
+  endif()
+  MESSAGE(STATUS "Set manual version to ${CAF_RELEASE}")
+  configure_file("${MANUAL_DIR}/variables.tex.in"
+                 "${MANUAL_DIR}/variables.tex"
+                 IMMEDIATE @ONLY)
+  configure_file("${MANUAL_DIR}/conf.py.in"
+                 "${MANUAL_DIR}/conf.py"
+                 IMMEDIATE @ONLY)
+endif()
 
 ################################################################################
 #                     Add additional project files to GUI                      #
@@ -567,14 +619,15 @@ macro(invertYesNo in out)
   endif()
 endmacro()
 # invert CAF_NO_* variables for nicer output
+invertYesNo(CAF_NO_IO CAF_BUILD_IO)
 invertYesNo(CAF_NO_EXAMPLES CAF_BUILD_EXAMPLES)
+invertYesNo(CAF_NO_TOOLS CAF_BUILD_TOOLS)
 invertYesNo(CAF_NO_UNIT_TESTS CAF_BUILD_UNIT_TESTS)
-invertYesNo(CAF_NO_RIAC CAF_BUILD_RIAC)
-invertYesNo(CAF_NO_NEXUS CAF_BUILD_NEXUS)
-invertYesNo(CAF_NO_CASH CAF_BUILD_CASH)
+invertYesNo(CAF_NO_EXCEPTIONS CAF_BUILD_WITH_EXCEPTIONS)
 invertYesNo(CAF_NO_MEM_MANAGEMENT CAF_BUILD_MEM_MANAGEMENT)
 invertYesNo(CAF_NO_BENCHMARKS CAF_BUILD_BENCHMARKS)
 invertYesNo(CAF_NO_OPENCL CAF_BUILD_OPENCL)
+invertYesNo(CAF_NO_PYTHON CAF_BUILD_PYTHON)
 # collect all compiler flags
 string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
 set(ALL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${UPPER_BUILD_TYPE}}")
@@ -591,14 +644,15 @@ if(NOT CAF_NO_SUMMARY)
         "\nRuntime checks:    ${CAF_ENABLE_RUNTIME_CHECKS}"
         "\nLog level:         ${LOG_LEVEL_STR}"
         "\nWith mem. mgmt.:   ${CAF_BUILD_MEM_MANAGEMENT}"
+        "\nWith exceptions:   ${CAF_BUILD_WITH_EXCEPTIONS}"
         "\n"
+        "\nBuild I/O module:  ${CAF_BUILD_IO}"
+        "\nBuild tools:       ${CAF_BUILD_TOOLS}"
         "\nBuild examples:    ${CAF_BUILD_EXAMPLES}"
         "\nBuild unit tests:  ${CAF_BUILD_UNIT_TESTS}"
-        "\nBuild riac:        ${CAF_BUILD_RIAC}"
-        "\nBuild nexus:       ${CAF_BUILD_NEXUS}"
-        "\nBuild cash:        ${CAF_BUILD_CASH}"
         "\nBuild benchmarks:  ${CAF_BUILD_BENCHMARKS}"
         "\nBuild opencl:      ${CAF_BUILD_OPENCL}"
+        "\nBuild Python:      ${CAF_BUILD_PYTHON}"
         "\n"
         "\nCXX:               ${CMAKE_CXX_COMPILER}"
         "\nCXXFLAGS:          ${ALL_CXX_FLAGS}"

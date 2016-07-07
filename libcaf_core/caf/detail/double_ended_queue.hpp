@@ -22,8 +22,6 @@
 
 #include "caf/config.hpp"
 
-#define CAF_CACHE_LINE_SIZE 64
-
 #include <chrono>
 #include <thread>
 #include <atomic>
@@ -148,13 +146,13 @@ public:
     auto next = first->next.load();
     // first_ always points to a dummy with no value,
     // hence we put the new element second
-    if (next == nullptr) {
+    if (next) {
+      CAF_ASSERT(first != tail_);
+      tmp->next = next;
+    } else {
       // queue is empty
       CAF_ASSERT(first == tail_);
       tail_ = tmp;
-    } else {
-      CAF_ASSERT(first != tail_);
-      tmp->next = next;
     }
     first->next = tmp;
   }

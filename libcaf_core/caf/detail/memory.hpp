@@ -30,7 +30,6 @@
 #include "caf/ref_counted.hpp"
 
 #include "caf/detail/embedded.hpp"
-#include "caf/detail/memory_cache_flag_type.hpp"
 
 namespace caf {
 class mailbox_element;
@@ -61,27 +60,6 @@ class basic_memory_cache;
 
 #ifdef CAF_NO_MEM_MANAGEMENT
 
-template <class T>
-struct rc_storage : public ref_counted {
-  T instance;
-  template <class... Ts>
-  rc_storage(Ts&&... xs)
-      : instance(intrusive_ptr<ref_counted>(this, false),
-        std::forward<Ts>(xs)...) {
-    CAF_ASSERT(get_reference_count() >= 1);
-  }
-};
-
-template <class T>
-T* unbox_rc_storage(T* ptr) {
-  return ptr;
-}
-
-template <class T>
-T* unbox_rc_storage(rc_storage<T>* ptr) {
-  return &(ptr->instance);
-}
-
 class memory {
 public:
   memory() = delete;
@@ -89,13 +67,7 @@ public:
   // Allocates storage, initializes a new object, and returns the new instance.
   template <class T, class... Ts>
   static T* create(Ts&&... xs) {
-    using embedded_t =
-      typename std::conditional<
-        T::memory_cache_flag == provides_embedding,
-        rc_storage<T>,
-        T
-       >::type;
-    return unbox_rc_storage(new embedded_t(std::forward<Ts>(xs)...));
+    return new T(std::forward<Ts>(xs)...);
   }
 
   static inline memory_cache* get_cache_map_entry(const std::type_info*) {
@@ -114,12 +86,7 @@ public:
 
   static_assert(dsize > 0, "dsize == 0");
 
-  using embedded_t =
-    typename std::conditional<
-      T::memory_cache_flag == needs_embedding,
-      embedded<T>,
-      T
-     >::type;
+  using embedded_t = embedded<T>;
 
   struct wrapper {
     union {
@@ -192,12 +159,7 @@ public:
   // Allocates storage, initializes a new object, and returns the new instance.
   template <class T, class... Ts>
   static T* create(Ts&&... xs) {
-    using embedded_t =
-      typename std::conditional<
-        T::memory_cache_flag == needs_embedding,
-        embedded<T>,
-        T
-       >::type;
+    using embedded_t = embedded<T>;
     auto mc = get_or_set_cache_map_entry<T>();
     auto es = mc->new_embedded_storage();
     auto ptr = reinterpret_cast<embedded_t*>(es.second);

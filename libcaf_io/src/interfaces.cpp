@@ -93,11 +93,11 @@ void for_each_address(bool get_ipv4, bool get_ipv6, F fun) {
   size_t try_nr = 0;
   int retval = 0;
   do {
-    if (tmp != nullptr)
+    if (tmp)
       free(tmp);
     tmp = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(malloc(tmp_size));
-    if (tmp == nullptr)
-      throw std::bad_alloc();
+    if (! tmp)
+      CAF_RAISE_ERROR("malloc() failed");
     retval = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX,
                                   nullptr, tmp, &tmp_size);
   } while (retval == ERROR_BUFFER_OVERFLOW && ++try_nr < max_tries);
@@ -216,9 +216,9 @@ std::vector<std::string> interfaces::list_addresses(protocol proc,
   return list_addresses({proc}, include_localhost);
 }
 
-maybe<std::pair<std::string, protocol>>
+optional<std::pair<std::string, protocol>>
 interfaces::native_address(const std::string& host,
-                           maybe<protocol> preferred) {
+                           optional<protocol> preferred) {
   addrinfo hint;
   memset(&hint, 0, sizeof(hint));
   hint.ai_socktype = SOCK_STREAM;
@@ -232,7 +232,8 @@ interfaces::native_address(const std::string& host,
   for (auto i = addrs.get(); i != nullptr; i = i->ai_next) {
     auto family = fetch_addr_str(true, true, buffer, i->ai_addr);
     if (family != AF_UNSPEC)
-      return {{buffer, family == AF_INET ? protocol::ipv4 : protocol::ipv6}};
+      return std::make_pair(buffer, family == AF_INET ? protocol::ipv4
+                                                      : protocol::ipv6);
   }
   return none;
 }

@@ -44,12 +44,14 @@ using hook_uptr = std::unique_ptr<hook>;
 /// Interface to define hooks into the IO layer.
 class hook {
 public:
+  explicit hook(actor_system& sys);
+
   virtual ~hook();
 
   /// Called whenever a message has arrived via the network.
   virtual void message_received_cb(const node_id& source,
-                                   const actor_addr& from,
-                                   const actor_addr& dest,
+                                   const strong_actor_ptr& from,
+                                   const strong_actor_ptr& dest,
                                    message_id mid,
                                    const message& msg);
 
@@ -61,13 +63,13 @@ public:
   ///             have a direct connection to `dest_node`.
   /// @param mid The ID of the message.
   /// @param payload The message we've sent.
-  virtual void message_sent_cb(const actor_addr& from, const node_id& hop,
-                               const actor_addr& dest, message_id mid,
+  virtual void message_sent_cb(const strong_actor_ptr& from, const node_id& hop,
+                               const strong_actor_ptr& dest, message_id mid,
                                const message& payload);
 
   /// Called whenever no route for sending a message exists.
-  virtual void message_sending_failed_cb(const actor_addr& from,
-                                         const actor_addr& dest,
+  virtual void message_sending_failed_cb(const strong_actor_ptr& from,
+                                         const strong_actor_ptr& dest,
                                          message_id mid,
                                          const message& payload);
 
@@ -80,12 +82,12 @@ public:
                                             const std::vector<char>* payload);
 
   /// Called whenever an actor has been published.
-  virtual void actor_published_cb(const actor_addr& addr,
+  virtual void actor_published_cb(const strong_actor_ptr& addr,
                                   const std::set<std::string>& ifs,
                                   uint16_t port);
 
   /// Called whenever a new remote actor appeared.
-  virtual void new_remote_actor_cb(const actor_addr& addr);
+  virtual void new_remote_actor_cb(const strong_actor_ptr& addr);
 
   /// Called whenever a handshake via a direct TCP connection succeeded.
   virtual void new_connection_established_cb(const node_id& node);
@@ -108,7 +110,7 @@ public:
   /// tried to send a message to an actor ID that could not be found
   /// in the registry.
   virtual void invalid_message_received_cb(const node_id& source,
-                                           const actor_addr& sender,
+                                           const strong_actor_ptr& sender,
                                            actor_id invalid_dest,
                                            message_id mid, const message& msg);
 
@@ -138,22 +140,15 @@ public:
     dispatch(event<Event>{}, std::forward<Ts>(ts)...);
   }
 
-  /// Forwards an event to the next hook.
-  template <event_type Event, typename... Ts>
-  void call_next(Ts&&... ts) {
-    if (next) {
-      next->dispatch(event<Event>{}, std::forward<Ts>(ts)...);
-    }
+  inline actor_system& system() const {
+    return system_;
   }
-
-  /// Intrusive pointer to the next hook. Hooks are stored as a simple,
-  /// singly linked list.
-  hook_uptr next;
 
 private:
   // ------------ convenience interface based on static dispatching ------------
   template <event_type Id>
   using event = std::integral_constant<event_type, Id>;
+
   CAF_IO_HOOK_DISPATCH(message_received)
   CAF_IO_HOOK_DISPATCH(message_sent)
   CAF_IO_HOOK_DISPATCH(message_forwarded)
@@ -167,6 +162,8 @@ private:
   CAF_IO_HOOK_DISPATCH(route_lost)
   CAF_IO_HOOK_DISPATCH(invalid_message_received)
   CAF_IO_HOOK_DISPATCH(before_shutdown)
+
+  actor_system& system_;
 };
 
 } // namespace io

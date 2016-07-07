@@ -20,6 +20,13 @@
 #ifndef CAF_IO_SYSTEM_MESSAGES_HPP
 #define CAF_IO_SYSTEM_MESSAGES_HPP
 
+#include <tuple>
+#include <vector>
+#include <sstream>
+#include <iomanip>
+
+#include "caf/meta/type_name.hpp"
+
 #include "caf/io/handle.hpp"
 #include "caf/io/accept_handle.hpp"
 #include "caf/io/connection_handle.hpp"
@@ -34,6 +41,11 @@ struct new_connection_msg {
   /// The handle for the new connection.
   connection_handle handle;
 };
+
+template <class Inspector>
+error inspect(Inspector& f, new_connection_msg& x) {
+  return f(meta::type_name("new_connection_msg"), x.source, x.handle);
+}
 
 /// @relates new_connection_msg
 inline bool operator==(const new_connection_msg& lhs,
@@ -56,6 +68,12 @@ struct new_data_msg {
 };
 
 /// @relates new_data_msg
+template <class Inspector>
+error inspect(Inspector& f, new_data_msg& x) {
+  return f(meta::type_name("new_data_msg"), x.handle, x.buf);
+}
+
+/// @relates new_data_msg
 inline bool operator==(const new_data_msg& lhs, const new_data_msg& rhs) {
   return lhs.handle == rhs.handle && lhs.buf == rhs.buf;
 }
@@ -65,11 +83,49 @@ inline bool operator!=(const new_data_msg& lhs, const new_data_msg& rhs) {
   return !(lhs == rhs);
 }
 
+/// Signalizes that a certain amount of bytes has been written.
+struct data_transferred_msg {
+  /// Handle to the related connection.
+  connection_handle handle;
+  /// Number of transferred bytes.
+  uint64_t written;
+  /// Number of remaining bytes in all send buffers.
+  uint64_t remaining;
+};
+
+/// @relates data_transferred_msg
+template <class Inspector>
+error inspect(Inspector& f, data_transferred_msg& x) {
+  return f(meta::type_name("data_transferred_msg"),
+           x.handle, x.written, x.remaining);
+}
+
+/// @relates data_transferred_msg
+inline bool operator==(const data_transferred_msg& x,
+                       const data_transferred_msg& y) {
+  return x.handle == y.handle
+      && x.written == y.written
+      && x.remaining == y.remaining;
+}
+
+/// @relates data_transferred_msg
+inline bool operator!=(const data_transferred_msg& x,
+                       const data_transferred_msg& y) {
+  return ! (x == y);
+}
+
+
 /// Signalizes that a {@link broker} connection has been closed.
 struct connection_closed_msg {
   /// Handle to the closed connection.
   connection_handle handle;
 };
+
+/// @relates connection_closed_msg
+template <class Inspector>
+error inspect(Inspector& f, connection_closed_msg& x) {
+  return f(meta::type_name("connection_closed_msg"), x.handle);
+}
 
 /// @relates connection_closed_msg
 inline bool operator==(const connection_closed_msg& lhs,
@@ -88,6 +144,12 @@ struct acceptor_closed_msg {
   /// Handle to the closed connection.
   accept_handle handle;
 };
+
+/// @relates connection_closed_msg
+template <class Inspector>
+error inspect(Inspector& f, acceptor_closed_msg& x) {
+  return f(meta::type_name("acceptor_closed_msg"), x.handle);
+}
 
 /// @relates acceptor_closed_msg
 inline bool operator==(const acceptor_closed_msg& lhs,

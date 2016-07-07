@@ -22,7 +22,11 @@
 
 #include <functional>
 
+#include "caf/error.hpp"
+
 #include "caf/io/handle.hpp"
+
+#include "caf/meta/type_name.hpp"
 
 namespace caf {
 namespace io {
@@ -50,6 +54,11 @@ public:
 
   constexpr connection_handle(const invalid_connection_handle_t&) {
     // nop
+  }
+
+  template <class Inspector>
+  friend error inspect(Inspector& f, connection_handle& x) {
+    return f(meta::type_name("connection_handle"), x.id_);
   }
 
  private:

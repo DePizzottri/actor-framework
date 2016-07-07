@@ -19,13 +19,19 @@
 
 #include "caf/deserializer.hpp"
 
+#include "caf/actor_system.hpp"
+
 namespace caf {
 
-deserializer::deserializer(actor_namespace* ns) : namespace_{ns} {
+deserializer::~deserializer() {
   // nop
 }
 
-deserializer::~deserializer() {
+deserializer::deserializer(actor_system& x) : super(x.dummy_execution_unit()) {
+  // nop
+}
+
+deserializer::deserializer(execution_unit* x) : super(x) {
   // nop
 }
 

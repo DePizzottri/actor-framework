@@ -24,127 +24,115 @@
 #include <iterator>
 #include <typeinfo>
 
-#include "caf/intrusive_ptr.hpp"
 
+#include "caf/fwd.hpp"
 #include "caf/config.hpp"
 #include "caf/ref_counted.hpp"
-#include "caf/uniform_type_info.hpp"
+#include "caf/intrusive_ptr.hpp"
+#include "caf/type_erased_tuple.hpp"
 
 #include "caf/detail/type_list.hpp"
 
 namespace caf {
 namespace detail {
 
-class message_data : public ref_counted {
+class message_data : public ref_counted, public type_erased_tuple {
 public:
+  // -- nested types -----------------------------------------------------------
+
+  class cow_ptr;
+
+  // -- constructors, destructors, and assignment operators --------------------
+
   message_data() = default;
   message_data(const message_data&) = default;
+
   ~message_data();
 
-  /****************************************************************************
-   *                                modifiers                                 *
-   ****************************************************************************/
-
-  virtual void* mutable_at(size_t pos) = 0;
-
-  /****************************************************************************
-   *                                observers                                 *
-   ****************************************************************************/
-
-  // computes "@<>+..." formatted type name
-  std::string tuple_type_names() const;
-
-  // compares each element using uniform_type_info objects
-  bool equals(const message_data& other) const;
-
-  virtual size_t size() const = 0;
-
-  virtual const void* at(size_t pos) const = 0;
-
-  // Tries to match element at position `pos` to given RTTI.
-  virtual bool match_element(size_t pos, uint16_t typenr,
-                             const std::type_info* rtti) const = 0;
-
-  virtual uint32_t type_token() const = 0;
-
-  virtual const char* uniform_name_at(size_t pos) const = 0;
-
-  virtual uint16_t type_nr_at(size_t pos) const = 0;
-
-  /****************************************************************************
-   *                               nested types                               *
-   ****************************************************************************/
-
-  class cow_ptr {
-  public:
-    cow_ptr() = default;
-    cow_ptr(cow_ptr&&) = default;
-    cow_ptr(const cow_ptr&) = default;
-    cow_ptr& operator=(cow_ptr&&) = default;
-    cow_ptr& operator=(const cow_ptr&) = default;
-
-    template <class T>
-    cow_ptr(intrusive_ptr<T> p) : ptr_(std::move(p)) {
-      // nop
-    }
-
-    inline cow_ptr(message_data* ptr, bool add_ref) : ptr_(ptr, add_ref) {
-      // nop
-    }
-
-    /**************************************************************************
-     *                               modifiers                                *
-     **************************************************************************/
-
-    inline void swap(cow_ptr& other) {
-      ptr_.swap(other.ptr_);
-    }
-
-    inline void reset(message_data* p = nullptr, bool add_ref = true) {
-      ptr_.reset(p, add_ref);
-    }
-
-    inline message_data* release() {
-      return ptr_.detach();
-    }
-
-    inline void unshare() {
-      static_cast<void>(get_unshared());
-    }
-
-    inline message_data* operator->() {
-      return get_unshared();
-    }
-
-    inline message_data& operator*() {
-      return *get_unshared();
-    }
-    /**************************************************************************
-     *                               observers                                *
-     **************************************************************************/
-
-    inline const message_data* operator->() const {
-      return ptr_.get();
-    }
-
-    inline const message_data& operator*() const {
-      return *ptr_.get();
-    }
-
-    inline explicit operator bool() const {
-      return static_cast<bool>(ptr_);
-    }
-
-    inline message_data* get() const {
-      return ptr_.get();
-    }
-
-  private:
-    message_data* get_unshared();
-    intrusive_ptr<message_data> ptr_;
-  };
+  // -- pure virtual observers -------------------------------------------------
 
   virtual cow_ptr copy() const = 0;
+
+  // -- observers --------------------------------------------------------------
+
+  using type_erased_tuple::copy;
+
+  bool shared() const noexcept override;
+};
+
+class message_data::cow_ptr {
+public:
+  // -- constructors, destructors, and assignment operators ------------------
+
+  cow_ptr() noexcept = default;
+  cow_ptr(cow_ptr&&) noexcept = default;
+  cow_ptr(const cow_ptr&) noexcept = default;
+  cow_ptr& operator=(cow_ptr&&) noexcept = default;
+  cow_ptr& operator=(const cow_ptr&) noexcept = default;
+
+  template <class T>
+  cow_ptr(intrusive_ptr<T> p) noexcept : ptr_(std::move(p)) {
+    // nop
+  }
+
+  inline cow_ptr(message_data* ptr, bool add_ref) noexcept
+      : ptr_(ptr, add_ref) {
+    // nop
+  }
+
+  // -- modifiers ------------------------------------------------------------
+
+  inline void swap(cow_ptr& other) noexcept {
+    ptr_.swap(other.ptr_);
+  }
+
+  inline void reset(message_data* p = nullptr, bool add_ref = true) noexcept {
+    ptr_.reset(p, add_ref);
+  }
+
+  inline message_data* release() noexcept {
+    return ptr_.detach();
+  }
+
+  inline void unshare() {
+    static_cast<void>(get_unshared());
+  }
+
+  inline message_data* operator->() {
+    return get_unshared();
+  }
+
+  inline message_data& operator*() {
+    return *get_unshared();
+  }
+
+  /// Returns the raw pointer. Callers are responsible for unsharing
+  /// the content if necessary.
+  inline message_data* raw_ptr() {
+    return ptr_.get();
+  }
+
+  // -- observers ------------------------------------------------------------
+
+  inline const message_data* operator->() const noexcept {
+    return ptr_.get();
+  }
+
+  inline const message_data& operator*() const noexcept {
+    return *ptr_.get();
+  }
+
+  inline explicit operator bool() const noexcept {
+    return static_cast<bool>(ptr_);
+  }
+
+  inline message_data* get() const noexcept {
+    return ptr_.get();
+  }
+
+private:
+  message_data* get_unshared();
+  intrusive_ptr<message_data> ptr_;
 };
 
 } // namespace detail

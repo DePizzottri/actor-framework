@@ -20,6 +20,7 @@
 #ifndef CAF_VARIANT_HPP
 #define CAF_VARIANT_HPP
 
+#include "caf/config.hpp"
 #include "caf/static_visitor.hpp"
 
 #include "caf/detail/type_list.hpp"
@@ -166,7 +167,7 @@ private:
   template <class Self, typename Visitor>
   static typename Visitor::result_type  apply_impl(Self& from, Visitor& visitor) {
     switch (from.type_) {
-      default: throw std::runtime_error("invalid type found");
+      default: CAF_RAISE_ERROR("invalid type found");
       CAF_VARIANT_CASE(0);
       CAF_VARIANT_CASE(1);
       CAF_VARIANT_CASE(2);
@@ -200,12 +201,11 @@ private:
   template <class U>
   void set(U&& arg) {
     using type = typename std::decay<U>::type;
-    static constexpr int type_id = detail::tl_find_if<
-                       types,
-                       detail::tbind<
-                         is_same_ish, type
-                       >::template type
-                     >::value;
+    static constexpr int type_id =
+      detail::tl_index_where<
+        types,
+        detail::tbind<is_same_ish, type>::template type
+      >::value;
     static_assert(type_id >= 0, "invalid type for variant");
     std::integral_constant<int, type_id> token;
     if (type_ != type_id) {
@@ -221,7 +221,7 @@ private:
   template <class... Us>
   void set(const variant<Us...>& other) {
     using namespace detail;
-    static_assert(tlf_is_subset<type_list<Us...>, types>(),
+    static_assert(tl_subset_of<type_list<Us...>, types>::value,
                   "cannot set variant of type A to variant of type B "
                   "unless the element types of A are a strict subset of "
                   "the element types of B");
@@ -232,7 +232,7 @@ private:
   template <class... Us>
   void set(variant<Us...>&& other) {
     using namespace detail;
-    static_assert(tlf_is_subset<type_list<Us...>, types>(),
+    static_assert(tl_subset_of<type_list<Us...>, types>::value,
                   "cannot set variant of type A to variant of type B "
                   "unless the element types of A are a strict subset of "
                   "the element types of B");
@@ -248,8 +248,8 @@ private:
 template <class T, class... Us>
 T& get(variant<Us...>& value) {
   using namespace detail;
-  int_token<tl_find_if<type_list<Us...>,
-                       tbind<is_same_ish, T>::template type>::value> token;
+  int_token<tl_index_where<type_list<Us...>,
+                           tbind<is_same_ish, T>::template type>::value> token;
   // silence compiler error about "binding to unrelated types" such as
   // 'signed char' to 'char' (which is obvious bullshit)
   return reinterpret_cast<T&>(value.get(token));
@@ -266,8 +266,8 @@ const T& get(const variant<Us...>& value) {
 template <class T, class... Us>
 T* get(variant<Us...>* value) {
   using namespace detail;
-  int_token<tl_find_if<type_list<Us...>,
-                       tbind<is_same_ish, T>::template type>::value> token;
+  int_token<tl_index_where<type_list<Us...>,
+                           tbind<is_same_ish, T>::template type>::value> token;
   if (value->is(token))
     return &get<T>(*value);
   return nullptr;

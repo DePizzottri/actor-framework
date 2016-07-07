@@ -27,47 +27,23 @@
 
 #include "caf/all.hpp"
 
-namespace caf {
-
-std::ostream& operator<<(std::ostream& out, const message& msg) {
-  return out << to_string(msg);
-}
-
-} // namespace caf
-
 using namespace caf;
 
 using std::string;
 
-// exclude this test; advanced match cases are currently not supported on MSVC
-#ifndef CAF_WINDOWS
-CAF_TEST(simple_ints) {
-  auto msg = make_message(1, 2, 3);
-  auto one = on(1) >> [] { };
-  auto two = on(2) >> [] { };
-  auto three = on(3) >> [] { };
-  auto skip_two = [](int i) -> maybe<skip_message_t> {
-    if (i == 2) {
-      return skip_message();
-    }
-    return none;
-  };
-  CAF_CHECK_EQUAL(msg.extract(one), make_message(2, 3));
-  CAF_CHECK_EQUAL(msg.extract(two), make_message(1, 3));
-  CAF_CHECK_EQUAL(msg.extract(three), make_message(1, 2));
-  CAF_CHECK_EQUAL(msg.extract(skip_two), make_message(2));
-}
-#endif // CAF_WINDOWS
-
 CAF_TEST(type_sequences) {
   auto _64 = uint64_t{64};
-  auto msg = make_message(1.0, 2.f, "str", 42, _64);
+  std::string str = "str";
+  auto msg = make_message(1.0, 2.f, str, 42, _64);
   auto df = [](double, float) { };
   auto fs = [](float, const string&) { };
   auto iu = [](int, uint64_t) { };
-  CAF_CHECK_EQUAL(msg.extract(df), make_message("str", 42,  _64));
-  CAF_CHECK_EQUAL(msg.extract(fs), make_message(1.0, 42,  _64));
-  CAF_CHECK_EQUAL(msg.extract(iu), make_message(1.0, 2.f, "str"));
+  CAF_CHECK_EQUAL(to_string(msg.extract(df)),
+                  to_string(make_message(str, 42,  _64)));
+  CAF_CHECK_EQUAL(to_string(msg.extract(fs)),
+                  to_string(make_message(1.0, 42,  _64)));
+  CAF_CHECK_EQUAL(to_string(msg.extract(iu)),
+                  to_string(make_message(1.0, 2.f, str)));
 }
 
 CAF_TEST(cli_args) {
@@ -81,12 +57,12 @@ CAF_TEST(cli_args) {
     {"in-file,i", "read from file", input_file},
     {"verbosity,v", "1-5", verbosity}
   });
-  CAF_CHECK_EQUAL(res.remainder.size(), 0);
-  CAF_CHECK_EQUAL(to_string(res.remainder), to_string(message{}));
-  CAF_CHECK_EQUAL(res.opts.count("no-colors"), 1);
-  CAF_CHECK_EQUAL(res.opts.count("verbosity"), 1);
-  CAF_CHECK_EQUAL(res.opts.count("out-file"), 1);
-  CAF_CHECK_EQUAL(res.opts.count("in-file"), 0);
+  CAF_CHECK_EQUAL(res.remainder.size(), 0u);
+  CAF_CHECK(res.remainder.empty());
+  CAF_CHECK_EQUAL(res.opts.count("no-colors"), 1u);
+  CAF_CHECK_EQUAL(res.opts.count("verbosity"), 1u);
+  CAF_CHECK_EQUAL(res.opts.count("out-file"), 1u);
+  CAF_CHECK_EQUAL(res.opts.count("in-file"), 0u);
   CAF_CHECK_EQUAL(output_file, "/dev/null");
   CAF_CHECK_EQUAL(input_file, "");
 }

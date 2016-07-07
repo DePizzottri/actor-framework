@@ -19,19 +19,14 @@
 
 #include "caf/config.hpp"
 
-// exclude this suite; advanced match cases are currently not supported on MSVC
-#ifndef CAF_WINDOWS
-
 #define CAF_SUITE match
 #include "caf/test/unit_test.hpp"
 
 #include <functional>
 
-#include "caf/on.hpp"
-#include "caf/announce.hpp"
-#include "caf/shutdown.hpp"
 #include "caf/message_builder.hpp"
 #include "caf/message_handler.hpp"
+#include "caf/make_type_erased_tuple_view.hpp"
 
 using namespace caf;
 using namespace std;
@@ -39,164 +34,102 @@ using namespace std;
 using hi_atom = atom_constant<atom("hi")>;
 using ho_atom = atom_constant<atom("ho")>;
 
-function<maybe<string>(const string&)> starts_with(const string& s) {
-  return [=](const string& str) -> maybe<string> {
-    if (str.size() > s.size() && str.compare(0, s.size(), s) == 0) {
-      auto res = str.substr(s.size());
-      return res;
-    }
-    return none;
-  };
-}
-
-maybe<int> toint(const string& str) {
-  char* endptr = nullptr;
-  int result = static_cast<int>(strtol(str.c_str(), &endptr, 10));
-  if (endptr != nullptr && *endptr == '\0') {
-    return result;
-  }
-  return none;
-}
-
 namespace {
 
-bool s_invoked[] = {false, false, false, false};
+using rtti_pair = std::pair<uint16_t, const std::type_info*>;
+
+std::string to_string(const rtti_pair& x) {
+  std::string result = "(";
+  result += std::to_string(x.first);
+  result += ", ";
+  result += x.second ? x.second->name() : "<null>";
+  result += ")";
+  return result;
+}
+
+struct fixture {
+  using array_type = std::array<bool, 4>;
+
+  fixture() {
+    reset();
+  }
+
+  void reset() {
+    for (auto& x : invoked)
+      x = false;
+  }
+
+  template <class... Ts>
+  ptrdiff_t invoke(message_handler expr, Ts... xs) {
+    auto msg1 = make_message(xs...);
+    auto msg2 = message_builder{}.append_all(xs...).move_to_message();
+    auto msg3 = make_type_erased_tuple_view(xs...);
+    CAF_CHECK_EQUAL(to_string(msg1), to_string(msg2));
+    CAF_CHECK_EQUAL(to_string(msg1), to_string(msg3));
+    CAF_CHECK_EQUAL(msg1.type_token(), msg2.type_token());
+    CAF_CHECK_EQUAL(msg1.type_token(), msg3.type_token());
+    std::vector<std::string> msg1_types;
+    std::vector<std::string> msg2_types;
+    std::vector<std::string> msg3_types;
+    for (size_t i = 0; i < msg1.size(); ++i) {
+      msg1_types.push_back(to_string(msg1.type(i)));
+      msg2_types.push_back(to_string(msg2.type(i)));
+      msg3_types.push_back(to_string(msg3.type(i)));
+    }
+    CAF_CHECK_EQUAL(msg1_types, msg2_types);
+    CAF_CHECK_EQUAL(msg1_types, msg3_types);
+    set<ptrdiff_t> results;
+    process(results, expr, msg1, msg2, msg3);
+    if (results.size() > 1) {
+      CAF_ERROR("different results reported: " << deep_to_string(results));
+      return -2;
+    }
+    return *results.begin();
+  }
+
+  void process(std::set<ptrdiff_t>&, message_handler&) {
+    // end of recursion
+  }
+
+  template <class T, class... Ts>
+  void process(std::set<ptrdiff_t>& results, message_handler& expr,
+               T& x, Ts&... xs) {
+    expr(x);
+    results.insert(invoked_res());
+    reset();
+    process(results, expr, xs...);
+  }
+
+  ptrdiff_t invoked_res() {
+    auto first = begin(invoked);
+    auto last = end(invoked);
+    auto i = find(first, last, true);
+    if (i != last) {
+      CAF_REQUIRE_EQUAL(count(i, last, true), 1u);
+      return distance(first, i);
+    }
+    return -1;
+  }
+
+  array_type invoked;
+};
 
 } // namespace <anonymous>
 
-void reset() {
-  fill(begin(s_invoked), end(s_invoked), false);
-}
-
-void fill_mb(message_builder&) {
-  // end of recursion
-}
-
-template <class T, class... Ts>
-void fill_mb(message_builder& mb, const T& x, const Ts&... xs) {
-  fill_mb(mb.append(x), xs...);
-}
-
-template <class... Ts>
-ptrdiff_t invoked(message_handler expr, const Ts&... xs) {
-  vector<message> msgs;
-  msgs.push_back(make_message(xs...));
-  message_builder mb;
-  fill_mb(mb, xs...);
-  msgs.push_back(mb.to_message());
-  set<ptrdiff_t> results;
-  for (auto& msg : msgs) {
-    expr(msg);
-    auto first = begin(s_invoked);
-    auto last = end(s_invoked);
-    auto i = find(begin(s_invoked), last, true);
-    results.insert(i != last && count(i, last, true) == 1 ? distance(first, i)
-                                                          : -1);
-    reset();
-  }
-  if (results.size() > 1) {
-    CAF_TEST_ERROR("make_message() yielded a different result than "
-                   "message_builder(...).to_message()");
-    return -2;
-  }
-  return *results.begin();
-}
-
-function<void()> f(int idx) {
-  return [=] {
-    s_invoked[idx] = true;
-  };
-}
+CAF_TEST_FIXTURE_SCOPE(atom_constants_tests, fixture)
 
 CAF_TEST(atom_constants) {
-  auto expr = on(hi_atom::value) >> f(0);
-  CAF_CHECK_EQUAL(invoked(expr, hi_atom::value), 0);
-  CAF_CHECK_EQUAL(invoked(expr, ho_atom::value), -1);
-  CAF_CHECK_EQUAL(invoked(expr, hi_atom::value, hi_atom::value), -1);
-  message_handler expr2{
-    [](hi_atom) {
-      s_invoked[0] = true;
+  message_handler expr{
+    [&](hi_atom) {
+      invoked[0] = true;
     },
-    [](ho_atom) {
-      s_invoked[1] = true;
+    [&](ho_atom) {
+      invoked[1] = true;
     }
   };
-  CAF_CHECK_EQUAL(invoked(expr2, ok_atom::value), -1);
-  CAF_CHECK_EQUAL(invoked(expr2, hi_atom::value), 0);
-  CAF_CHECK_EQUAL(invoked(expr2, ho_atom::value), 1);
+  CAF_CHECK_EQUAL(invoke(expr, atom_value{ok_atom::value}), -1);
+  CAF_CHECK_EQUAL(invoke(expr, atom_value{hi_atom::value}), 0);
+  CAF_CHECK_EQUAL(invoke(expr, atom_value{ho_atom::value}), 1);
 }
 
-CAF_TEST(guards_called) {
-  bool guard_called = false;
-  auto guard = [&](int arg) -> maybe<int> {
-    guard_called = true;
-    return arg;
-  };
-  auto expr = on(guard) >> f(0);
-  CAF_CHECK_EQUAL(invoked(expr, 42), 0);
-  CAF_CHECK_EQUAL(guard_called, true);
-}
-
-CAF_TEST(forwarding_optionals) {
-  auto expr = (
-    on(starts_with("--")) >> [](const string& str) {
-      CAF_CHECK_EQUAL(str, "help");
-      s_invoked[0] = true;
-    }
-  );
-  CAF_CHECK_EQUAL(invoked(expr, "--help"), 0);
-  CAF_CHECK_EQUAL(invoked(expr, "-help"), -1);
-  CAF_CHECK_EQUAL(invoked(expr, "--help", "--help"), -1);
-  CAF_CHECK_EQUAL(invoked(expr, 42), -1);
-}
-
-CAF_TEST(projections) {
-  auto expr = (
-    on(toint) >> [](int i) {
-      CAF_CHECK_EQUAL(i, 42);
-      s_invoked[0] = true;
-    }
-  );
-  CAF_CHECK_EQUAL(invoked(expr, "42"), 0);
-  CAF_CHECK_EQUAL(invoked(expr, "42f"), -1);
-  CAF_CHECK_EQUAL(invoked(expr, "42", "42"), -1);
-  CAF_CHECK_EQUAL(invoked(expr, 42), -1);
-}
-
-struct wrapped_int {
-  int value;
-};
-
-inline bool operator==(const wrapped_int& lhs, const wrapped_int& rhs) {
-  return lhs.value == rhs.value;
-}
-
-CAF_TEST(arg_match_pattern) {
-  announce<wrapped_int>("wrapped_int", &wrapped_int::value);
-  auto expr = on(42, arg_match) >> [](int i) {
-    s_invoked[0] = true;
-    CAF_CHECK_EQUAL(i, 1);
-  };
-  CAF_CHECK_EQUAL(invoked(expr, 42, 1.f), -1);
-  CAF_CHECK_EQUAL(invoked(expr, 42), -1);
-  CAF_CHECK_EQUAL(invoked(expr, 1, 42), -1);
-  CAF_CHECK_EQUAL(invoked(expr, 42, 1), 0);
-  auto expr2 = on("-a", arg_match) >> [](const string& value) {
-    s_invoked[0] = true;
-    CAF_CHECK_EQUAL(value, "b");
-  };
-  CAF_CHECK_EQUAL(invoked(expr2, "b", "-a"), -1);
-  CAF_CHECK_EQUAL(invoked(expr2, "-a"), -1);
-  CAF_CHECK_EQUAL(invoked(expr2, "-a", "b"), 0);
-  auto expr3 = on(wrapped_int{42}, arg_match) >> [](wrapped_int i) {
-    s_invoked[0] = true;
-    CAF_CHECK_EQUAL(i.value, 1);
-  };
-  CAF_CHECK_EQUAL(invoked(expr3, wrapped_int{42}, 1.f), -1);
-  CAF_CHECK_EQUAL(invoked(expr3, 42), -1);
-  CAF_CHECK_EQUAL(invoked(expr3, wrapped_int{1}, wrapped_int{42}), -1);
-  CAF_CHECK_EQUAL(invoked(expr3, 42, 1), -1);
-  CAF_CHECK_EQUAL(invoked(expr3, wrapped_int{42}, wrapped_int{1}), 0);
-}
-
-#endif // CAF_WINDOWS
+CAF_TEST_FIXTURE_SCOPE_END()

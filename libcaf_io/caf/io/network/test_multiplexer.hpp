@@ -31,27 +31,31 @@ namespace network {
 
 class test_multiplexer : public multiplexer {
 public:
+  explicit test_multiplexer(actor_system* sys);
+
   ~test_multiplexer();
 
-  connection_handle new_tcp_scribe(const std::string& host,
+  expected<connection_handle> new_tcp_scribe(const std::string& host,
                                    uint16_t port) override;
 
-  void assign_tcp_scribe(abstract_broker* ptr, connection_handle hdl) override;
+  expected<void> assign_tcp_scribe(abstract_broker* ptr,
+                                   connection_handle hdl) override;
 
   connection_handle add_tcp_scribe(abstract_broker*, native_socket) override;
 
-  connection_handle add_tcp_scribe(abstract_broker* ptr,
-                                   const std::string& host,
-                                   uint16_t port) override;
+  expected<connection_handle> add_tcp_scribe(abstract_broker* ptr,
+                                             const std::string& host,
+                                             uint16_t port) override;
 
-  std::pair<accept_handle, uint16_t>
+  expected<std::pair<accept_handle, uint16_t>>
   new_tcp_doorman(uint16_t port, const char*, bool) override;
 
-  void assign_tcp_doorman(abstract_broker* ptr, accept_handle hdl) override;
+  expected<void> assign_tcp_doorman(abstract_broker* ptr,
+                                    accept_handle hdl) override;
 
   accept_handle add_tcp_doorman(abstract_broker*, native_socket) override;
 
-  std::pair<accept_handle, uint16_t>
+  expected<std::pair<accept_handle, uint16_t>>
   add_tcp_doorman(abstract_broker* ptr, uint16_t prt,
                   const char* in, bool reuse_addr) override;
 
@@ -76,7 +80,11 @@ public:
   /// Returns the input buffer of the scribe identified by `hdl`.
   buffer_type& input_buffer(connection_handle hdl);
 
+  /// Returns the configured read policy of the scribe identified by `hdl`.
   receive_policy::config& read_config(connection_handle hdl);
+
+  /// Returns whether the scribe identified by `hdl` receives write ACKs.
+  bool& ack_writes(connection_handle hdl);
 
   /// Returns `true` if this handle has been closed
   /// for reading, `false` otherwise.
@@ -103,7 +111,7 @@ public:
   using pending_scribes_map = std::map<std::pair<std::string, uint16_t>,
                                        connection_handle>;
 
-  pending_scribes_map& pending_scribes();
+  bool has_pending_scribe(std::string host, uint16_t port);
 
   /// Accepts a pending connect on `hdl`.
   void accept_connection(accept_handle hdl);
@@ -126,9 +134,13 @@ public:
   void flush_runnables();
 
 protected:
-  void dispatch_runnable(runnable_ptr ptr) override;
+  void exec_later(resumable* ptr) override;
 
 private:
+  using resumable_ptr = intrusive_ptr<resumable>;
+
+  void exec(resumable_ptr& ptr);
+
   using guard_type = std::unique_lock<std::mutex>;
 
   struct scribe_data {
@@ -138,6 +150,7 @@ private:
     receive_policy::config recv_conf;
     bool stopped_reading = false;
     intrusive_ptr<scribe> ptr;
+    bool ack_writes = false;
   };
 
   struct doorman_data {
@@ -146,9 +159,10 @@ private:
     intrusive_ptr<doorman> ptr;
   };
 
+  // guards resumables_ and scribes_
   std::mutex mx_;
   std::condition_variable cv_;
-  std::list<runnable_ptr> runnables_;
+  std::list<resumable_ptr> resumables_;
   pending_scribes_map scribes_;
   std::unordered_map<uint16_t, accept_handle> doormen_;
   std::unordered_map<connection_handle, scribe_data> scribe_data_;

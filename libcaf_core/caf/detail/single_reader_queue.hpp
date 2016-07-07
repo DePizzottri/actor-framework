@@ -67,7 +67,7 @@ public:
   }
 
   /// Tries to enqueue a new element to the mailbox.
-  /// @warning Call only from the reader (owner).
+  /// @threadsafe
   enqueue_result enqueue(pointer new_element) {
     CAF_ASSERT(new_element != nullptr);
     pointer e = stack_.load();
@@ -91,9 +91,8 @@ public:
   /// call to {@link try_pop} would succeeed.
   /// @pre !closed()
   bool can_fetch_more() {
-    if (head_ != nullptr) {
+    if (head_ != nullptr)
       return true;
-    }
     auto ptr = stack_.load();
     CAF_ASSERT(ptr != nullptr);
     return ! is_dummy(ptr);
@@ -103,12 +102,12 @@ public:
   /// @warning Call only from the reader (owner).
   bool empty() {
     CAF_ASSERT(! closed());
-    return cache_.empty() && head_ == nullptr && is_dummy(stack_.load());
+    return cache_.empty() && ! head_ && is_dummy(stack_.load());
   }
 
   /// Queries whether this has been closed.
   bool closed() {
-    return stack_.load() == nullptr;
+    return ! stack_.load();
   }
 
   /// Queries whether this has been marked as blocked, i.e.,
@@ -120,10 +119,8 @@ public:
   /// Tries to set this queue from state `empty` to state `blocked`.
   bool try_block() {
     auto e = stack_empty_dummy();
-    bool res = stack_.compare_exchange_strong(e, reader_blocked_dummy());
-    CAF_ASSERT(e != nullptr);
-    // return true in case queue was already blocked
-    return res || e == reader_blocked_dummy();
+    return stack_.compare_exchange_strong(e, reader_blocked_dummy());
+    //return res || e == reader_blocked_dummy();
   }
 
   /// Tries to set this queue from state `blocked` to state `empty`.
@@ -145,9 +142,8 @@ public:
   template <class F>
   void close(const F& f) {
     clear_cached_elements(f);
-    if (! blocked() && fetch_new_data(nullptr)) {
+    if (! blocked() && fetch_new_data(nullptr))
       clear_cached_elements(f);
-    }
     cache_.clear(f);
   }
 
@@ -156,16 +152,14 @@ public:
   }
 
   ~single_reader_queue() {
-    if (! closed()) {
+    if (! closed())
       close();
-    }
   }
 
   size_t count(size_t max_count = std::numeric_limits<size_t>::max()) {
     size_t res = cache_.count(max_count);
-    if (res >= max_count) {
+    if (res >= max_count)
       return res;
-    }
     fetch_new_data();
     auto ptr = head_;
     while (ptr && res < max_count) {
@@ -212,9 +206,8 @@ public:
     CAF_ASSERT(! closed());
     if (! can_fetch_more() && try_block()) {
       std::unique_lock<Mutex> guard(mtx);
-      while (blocked()) {
+      while (blocked())
         cv.wait(guard);
-      }
     }
   }
 
@@ -245,7 +238,7 @@ private:
 
   // atomically sets stack_ back and enqueues all elements to the cache
   bool fetch_new_data(pointer end_ptr) {
-    CAF_ASSERT(end_ptr == nullptr || end_ptr == stack_empty_dummy());
+    CAF_ASSERT(! end_ptr || end_ptr == stack_empty_dummy());
     pointer e = stack_.load();
     // must not be called on a closed queue
     CAF_ASSERT(e != nullptr);
@@ -260,7 +253,7 @@ private:
         CAF_ASSERT(e != reader_blocked_dummy());
         if (is_dummy(e)) {
           // only use-case for this is closing a queue
-          CAF_ASSERT(end_ptr == nullptr);
+          CAF_ASSERT(! end_ptr);
           return false;
         }
         while (e) {

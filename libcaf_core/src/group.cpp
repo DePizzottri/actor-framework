@@ -18,13 +18,21 @@
  ******************************************************************************/
 
 #include "caf/group.hpp"
-#include "caf/channel.hpp"
-#include "caf/message.hpp"
 
-#include "caf/detail/singletons.hpp"
-#include "caf/detail/group_manager.hpp"
+#include "caf/message.hpp"
+#include "caf/actor_cast.hpp"
+#include "caf/actor_system.hpp"
+#include "caf/group_manager.hpp"
 
 namespace caf {
+
+group::group(abstract_group* ptr) : ptr_(ptr) {
+  // nop
+}
+
+group::group(abstract_group* ptr, bool add_ref) : ptr_(ptr, add_ref) {
+  // nop
+}
 
 group::group(const invalid_group_t&) : ptr_(nullptr) {
   // nop
@@ -39,24 +47,47 @@ group& group::operator=(const invalid_group_t&) {
   return *this;
 }
 
-intptr_t group::compare(const group& other) const {
-  return channel::compare(ptr_.get(), other.ptr_.get());
+intptr_t group::compare(const abstract_group* lhs, const abstract_group* rhs) {
+  return reinterpret_cast<intptr_t>(lhs) - reinterpret_cast<intptr_t>(rhs);
 }
 
-group group::get(const std::string& arg0, const std::string& arg1) {
-  return detail::singletons::get_group_manager()->get(arg0, arg1);
+intptr_t group::compare(const group& other) const noexcept {
+  return compare(ptr_.get(), other.ptr_.get());
 }
 
-group group::anonymous() {
-  return detail::singletons::get_group_manager()->anonymous();
+error inspect(serializer& f, group& x) {
+  std::string mod_name;
+  auto ptr = x.get();
+  if (! ptr)
+    return f(mod_name);
+  mod_name = ptr->module().name();
+  auto e = f(mod_name);
+  return e ? e : ptr->save(f);
 }
 
-void group::add_module(abstract_group::unique_module_ptr ptr) {
-  detail::singletons::get_group_manager()->add_module(std::move(ptr));
+error inspect(deserializer& f, group& x) {
+  std::string module_name;
+  f(module_name);
+  if (module_name.empty()) {
+    x = invalid_group;
+    return none;
+  }
+  if (! f.context())
+    return sec::no_context;
+  auto& sys = f.context()->system();
+  auto mod = sys.groups().get_module(module_name);
+  if (! mod)
+    return sec::no_such_group_module;
+  return mod->load(f, x);
 }
 
-abstract_group::module_ptr group::get_module(const std::string& module_name) {
-  return detail::singletons::get_group_manager()->get_module(module_name);
+std::string to_string(const group& x) {
+  if (x == invalid_group)
+    return "<invalid-group>";
+  std::string result = x.get()->module().name();
+  result += "/";
+  result += x.get()->identifier();
+  return result;
 }
 
 } // namespace caf

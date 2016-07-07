@@ -20,9 +20,14 @@
 #ifndef CAF_GROUP_HPP
 #define CAF_GROUP_HPP
 
-#include "caf/intrusive_ptr.hpp"
+#include <string>
+#include <utility>
+#include <functional>
 
 #include "caf/fwd.hpp"
+#include "caf/none.hpp"
+#include "caf/group_module.hpp"
+#include "caf/intrusive_ptr.hpp"
 #include "caf/abstract_group.hpp"
 
 #include "caf/detail/comparable.hpp"
@@ -30,12 +35,8 @@
 
 namespace caf {
 
-class channel;
-class message;
-
 struct invalid_group_t {
   constexpr invalid_group_t() {}
-
 };
 
 /// Identifies an invalid {@link group}.
@@ -44,11 +45,11 @@ constexpr invalid_group_t invalid_group = invalid_group_t{};
 
 class group : detail::comparable<group>,
               detail::comparable<group, invalid_group_t> {
-
-  template <class T, typename U>
-  friend T actor_cast(const U&);
-
 public:
+  template <class, class, int>
+  friend class actor_cast_access;
+
+  using signatures = none_t;
 
   group() = default;
 
@@ -64,51 +65,101 @@ public:
 
   group& operator=(const invalid_group_t&);
 
+  group(abstract_group*);
+
   group(intrusive_ptr<abstract_group> ptr);
 
-  inline explicit operator bool() const { return static_cast<bool>(ptr_); }
+  inline explicit operator bool() const noexcept {
+    return static_cast<bool>(ptr_);
+  }
 
-  inline bool operator!() const { return ! static_cast<bool>(ptr_); }
+  inline bool operator!() const noexcept {
+    return ! ptr_;
+  }
 
-  /// Returns a handle that grants access to actor operations such as enqueue.
-  inline abstract_group* operator->() const { return ptr_.get(); }
+  static intptr_t compare(const abstract_group* lhs, const abstract_group* rhs);
 
-  inline abstract_group& operator*() const { return *ptr_; }
+  intptr_t compare(const group& other) const noexcept;
 
-  intptr_t compare(const group& other) const;
-
-  inline intptr_t compare(const invalid_actor_t&) const {
+  inline intptr_t compare(const invalid_group_t&) const noexcept {
     return ptr_ ? 1 : 0;
   }
 
-  /// Get a pointer to the group associated with
-  /// `identifier` from the module `mod_name`.
-  /// @threadsafe
-  static group get(const std::string& mod_name, const std::string& identifier);
-
-  /// Returns an anonymous group.
-  /// Each calls to this member function returns a new instance
-  /// of an anonymous group. Anonymous groups can be used whenever
-  /// a set of actors wants to communicate using an exclusive channel.
-  static group anonymous();
-
-  /// Add a new group module to the group management.
-  /// @threadsafe
-  static void add_module(abstract_group::unique_module_ptr);
-
-  /// Returns the module associated with `module_name`.
-  /// @threadsafe
-  static abstract_group::module_ptr
-  get_module(const std::string& module_name);
-
-  inline const abstract_group_ptr& ptr() const {
-    return ptr_;
+  template <class Inspector>
+  friend error inspect(Inspector& f, group& x) {
+    std::string x_id;
+    std::string x_mod;
+    auto ptr = x.get();
+    if (ptr) {
+      x_id = ptr->identifier();
+      x_mod = ptr->module().name();
+    }
+    return f(meta::type_name("group"),
+             meta::omittable_if_empty(), x_id,
+             meta::omittable_if_empty(), x_mod);
   }
 
+  friend error inspect(serializer&, group&);
+
+  friend error inspect(deserializer&, group&);
+
+  inline abstract_group* get() const noexcept {
+    return ptr_.get();
+  }
+
+  /// @cond PRIVATE
+
+  template <class... Ts>
+  void eq_impl(message_id mid, strong_actor_ptr sender,
+               execution_unit* ctx, Ts&&... xs) const {
+    CAF_ASSERT(! mid.is_request());
+    if (ptr_)
+      ptr_->enqueue(std::move(sender), mid,
+                    make_message(std::forward<Ts>(xs)...), ctx);
+  }
+
+  inline bool subscribe(strong_actor_ptr who) const {
+    if (! ptr_)
+      return false;
+    return ptr_->subscribe(std::move(who));
+  }
+
+  inline void unsubscribe(const actor_control_block* who) const {
+    if (ptr_)
+      ptr_->unsubscribe(who);
+  }
+
+  /// CAF's messaging primitives assume a non-null guarantee. A group
+  /// object indirects pointer-like access to a group to prevent UB.
+  inline const group* operator->() const noexcept {
+    return this;
+  }
+
+  /// @endcond
+
 private:
+  inline abstract_group* release() noexcept {
+    return ptr_.release();
+  }
+
+  group(abstract_group*, bool);
+
   abstract_group_ptr ptr_;
 };
 
+/// @relates group
+std::string to_string(const group& x);
+
 } // namespace caf
+
+namespace std {
+template <>
+struct hash<caf::group> {
+  inline size_t operator()(const caf::group& x) const {
+    // groups are singleton objects, the address is thus the best possible hash
+    return ! x ? 0 : reinterpret_cast<size_t>(x.get());
+  }
+};
+} // namespace std
 
 #endif // CAF_GROUP_HPP

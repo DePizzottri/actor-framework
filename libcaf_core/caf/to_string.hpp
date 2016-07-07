@@ -20,6 +20,30 @@
 #ifndef CAF_TO_STRING_HPP
 #define CAF_TO_STRING_HPP
 
-#include "caf/string_serialization.hpp"
+#include <string>
+
+#include "caf/error.hpp"
+#include "caf/deep_to_string.hpp"
+
+#include "caf/detail/type_traits.hpp"
+#include "caf/detail/stringification_inspector.hpp"
+
+namespace caf {
+
+template <class T,
+          class E = typename std::enable_if<
+                      detail::is_inspectable<
+                        detail::stringification_inspector,
+                        T
+                      >::value
+                    >::type>
+std::string to_string(const T& x) {
+  std::string res;
+  detail::stringification_inspector f{res};
+  inspect(f, const_cast<T&>(x));
+  return res;
+}
+
+} // namespace caf
 
 #endif // CAF_TO_STRING_HPP

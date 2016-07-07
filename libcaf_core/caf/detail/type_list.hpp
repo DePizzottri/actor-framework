@@ -25,6 +25,7 @@
 #include <type_traits>
 
 #include "caf/unit.hpp"
+#include "caf/none.hpp"
 
 #include "caf/detail/tbind.hpp"
 #include "caf/detail/type_pair.hpp"
@@ -302,16 +303,57 @@ struct tl_unzip<type_list<Elements...>> {
 
 // int index_of(list, type)
 
-template <class List, typename T>
-struct tl_index_of {
-  static constexpr size_t value =
-      tl_index_of<typename tl_tail<List>::type, T>::value;
+/// Finds the first element of type `What` beginning at index `Pos`.
+template <int Pos, class X, class... Ts>
+struct tl_index_of_impl;
+
+template <int Pos, class X>
+struct tl_index_of_impl<Pos, X> {
+  static constexpr int value = -1;
 };
 
-template <size_t N, typename T, class... Ts>
-struct tl_index_of<
-  type_list<type_pair<std::integral_constant<size_t, N>, T>, Ts...>, T> {
-  static constexpr size_t value = N;
+template <int Pos, class X, class... Ts>
+struct tl_index_of_impl<Pos, X, X, Ts...> {
+  static constexpr int value = Pos;
+};
+
+template <int Pos, class X, class T, class... Ts>
+struct tl_index_of_impl<Pos, X, T, Ts...> {
+  static constexpr int value = tl_index_of_impl<Pos + 1, X, Ts...>::value;
+};
+
+/// Finds the first element satisfying `Pred` beginning at index `Pos`.
+template <class List, class T>
+struct tl_index_of;
+
+template <class... Ts, class T>
+struct tl_index_of<type_list<Ts...>, T> {
+  static constexpr int value = tl_index_of_impl<0, T, Ts...>::value;
+};
+
+// int index_of(list, predicate)
+
+template <int Pos, template <class> class Pred, class... Ts>
+struct tl_index_where_impl;
+
+template <int Pos, template <class> class Pred>
+struct tl_index_where_impl<Pos, Pred> {
+  static constexpr int value = -1;
+};
+
+template <int Pos, template <class> class Pred, class T, class... Ts>
+struct tl_index_where_impl<Pos, Pred, T, Ts...> {
+  static constexpr int value
+    = Pred<T>::value ? Pos : tl_index_where_impl<Pos + 1, Pred, Ts...>::value;
+};
+
+/// Finds the first element satisfying a given predicate.
+template <class List, template <class> class Pred>
+struct tl_index_where;
+
+template <class... Ts, template <class> class Pred>
+struct tl_index_where<type_list<Ts...>, Pred> {
+  static constexpr int value = tl_index_where_impl<0, Pred, Ts...>::value;
 };
 
 // list reverse()
@@ -338,38 +380,31 @@ struct tl_reverse {
 // bool find(list, type)
 
 /// Finds the first element of type `What` beginning at index `Pos`.
-template <class List, template <class> class Pred, int Pos = 0>
+template <template <class> class Pred, class... Ts>
 struct tl_find_impl;
 
-template <template <class> class Pred, int Pos>
-struct tl_find_impl<type_list<>, Pred, Pos> {
-  static constexpr int value = -1;
+template <template <class> class Pred>
+struct tl_find_impl<Pred> {
+  using type = none_t;
 };
 
-template <template <class> class Pred, int Pos, class T0, class... Ts>
-struct tl_find_impl<type_list<T0, Ts...>, Pred, Pos> {
-  // always use type_list for recursive calls to minimize instantiation costs
-  static constexpr int value =
-      Pred<T0>::value ? Pos
-                      : tl_find_impl<type_list<Ts...>, Pred, Pos + 1>::value;
+template <template <class> class Pred, class T, class... Ts>
+struct tl_find_impl<Pred, T, Ts...> {
+  using type =
+    typename std::conditional<
+      Pred<T>::value,
+      T,
+      typename tl_find_impl<Pred, Ts...>::type
+    >::type;
 };
 
-/// Finds the first element satisfying `Pred` beginning at
-///    index `Pos`.
-template <class List, template <class> class Pred, int Pos = 0>
-struct tl_find_if {
-  static constexpr int value = tl_find_impl<List, Pred, Pos>::value;
-};
+/// Finds the first element satisfying `Pred` beginning at index `Pos`.
+template <class List, template <class> class Pred>
+struct tl_find;
 
-/// Finds the first element of type `What` beginning at
-///    index `Pos`.
-template <class List, class What, int Pos = 0>
-struct tl_find {
-  static constexpr int value = tl_find_impl<
-                                 List,
-                                 tbind<std::is_same, What>::template type,
-                                 Pos
-                               >::value;
+template <class... Ts, template <class> class Pred>
+struct tl_find<type_list<Ts...>, Pred> {
+  using type = typename tl_find_impl<Pred, Ts...>::type;
 };
 
 // bool forall(predicate)
@@ -441,6 +476,24 @@ struct tl_count<empty_type_list, Pred> {
 
 template <class List, template <class> class Pred>
 constexpr size_t tl_count<List, Pred>::value;
+
+// size_t count(type)
+
+/// Counts the number of elements in the list which are equal to `T`.
+template <class List, class T>
+struct tl_count_type {
+  static constexpr size_t value =
+    (std::is_same<typename tl_head<List>::type, T>::value ? 1 : 0)
+    + tl_count_type<typename tl_tail<List>::type, T>::value;
+};
+
+template <class T>
+struct tl_count_type<empty_type_list, T> {
+  static constexpr size_t value = 0;
+};
+
+template <class List, class T>
+constexpr size_t tl_count_type<List, T>::value;
 
 // size_t count_not(predicate)
 
@@ -577,6 +630,22 @@ struct tl_pop_back {
 template <>
 struct tl_pop_back<empty_type_list> {
   using type = empty_type_list;
+};
+
+// list replace_back()
+
+/// Creates a new list with all but the last element of `List`
+/// and append `T` to the new list.
+template <class List, class Back, class Intermediate = type_list<>>
+struct tl_replace_back;
+
+template <class T0, class T1, class... Ts, class Back, class... Us>
+struct tl_replace_back<type_list<T0, T1, Ts...>, Back, type_list<Us...>>
+    : tl_replace_back<type_list<T1, Ts...>, Back, type_list<Us..., T0>> {};
+
+template <class T, class Back, class... Us>
+struct tl_replace_back<type_list<T>, Back, type_list<Us...>> {
+  using type = type_list<Us..., Back>;
 };
 
 // type at(size_t)
@@ -841,6 +910,52 @@ struct tl_trim<empty_type_list, What> {
   using type = empty_type_list;
 };
 
+// list union(list1, list2)
+
+template <class... Xs>
+struct tl_union {
+  using type = typename tl_distinct<typename tl_concat<Xs...>::type>::type;
+};
+
+// list intersect(list1, list2)
+
+template <class List,
+          bool HeadIsUnique =
+            tl_count_type<List, typename tl_head<List>::type>::value == 1>
+struct tl_intersect_impl;
+
+template <>
+struct tl_intersect_impl<empty_type_list, false> {
+  using type = empty_type_list;
+};
+
+template <class T0, class... Ts>
+struct tl_intersect_impl<type_list<T0, Ts...>, true> {
+  using type = typename tl_intersect_impl<type_list<Ts...>>::type;
+};
+
+template <class T0, class... Ts>
+struct tl_intersect_impl<type_list<T0, Ts...>, false> {
+  using type =
+    typename tl_concat<
+      type_list<T0>,
+      typename tl_intersect_impl<
+        typename tl_filter_type<
+          type_list<Ts...>,
+          T0
+        >::type
+      >::type
+    >::type;
+};
+
+template <class... Ts>
+struct tl_intersect {
+  using type =
+    typename tl_intersect_impl<
+      typename tl_concat<Ts...>::type
+    >::type;
+};
+
 // list group_by(list, predicate)
 
 template <bool Append, class What, class Where>
@@ -912,39 +1027,41 @@ struct tl_apply<type_list<Ts...>, VarArgTemplate> {
   using type = VarArgTemplate<Ts...>;
 };
 
-// bool is_strict_subset(list,list)
+// contains(list, x)
 
-template <class T>
-constexpr int tlf_find(type_list<>, int = 0) {
-  return -1;
-}
+template <class List, class X>
+struct tl_contains;
 
-template <class T, class U, class... Us>
-constexpr int tlf_find(type_list<U, Us...>, int pos = 0) {
-  return std::is_same<T, U>::value ? pos
-                                   : tlf_find<T>(type_list<Us...>{}, pos + 1);
-}
+template <class X>
+struct tl_contains<type_list<>, X> : std::false_type {};
 
-constexpr bool tlf_no_negative() {
-  return true;
-}
+template <class... Ts, class X>
+struct tl_contains<type_list<X, Ts...>, X> : std::true_type {};
 
-template <class... Ts>
-constexpr bool tlf_no_negative(int x, Ts... xs) {
-  return x < 0 ? false : tlf_no_negative(xs...);
-}
+template <class T, class... Ts, class X>
+struct tl_contains<type_list<T, Ts...>, X> : tl_contains<type_list<Ts...>, X> {};
 
-template <class... Ts, class List>
-constexpr bool tlf_is_subset(type_list<Ts...>, List) {
-  return tlf_no_negative(tlf_find<Ts>(List{})...);
-}
+// subset_of(list, list)
+
+template <class ListA, class ListB, bool Fwd = true>
+struct tl_subset_of;
+
+template <class List>
+struct tl_subset_of<type_list<>, List, true> : std::true_type {};
+
+template <class ListA, class ListB>
+struct tl_subset_of<ListA, ListB, false> : std::false_type {};
+
+template <class T, class... Ts, class List>
+struct tl_subset_of<type_list<T, Ts...>, List>
+    : tl_subset_of<type_list<Ts...>, List, tl_contains<List, T>::value> {};
 
 /// Tests whether ListA contains the same elements as ListB
 /// and vice versa. This comparison ignores element positions.
 template <class ListA, class ListB>
 struct tl_equal {
-  static constexpr bool value = tlf_is_subset(ListA{}, ListB{})
-                                && tlf_is_subset(ListB{}, ListA{});
+  static constexpr bool value = tl_subset_of<ListA, ListB>::value
+                                && tl_subset_of<ListB, ListA>::value;
 };
 
 template <size_t N, class T>

@@ -20,7 +20,13 @@
 #ifndef CAF_IO_ACCEPT_HANDLE_HPP
 #define CAF_IO_ACCEPT_HANDLE_HPP
 
+#include <functional>
+
+#include "caf/error.hpp"
+
 #include "caf/io/handle.hpp"
+
+#include "caf/meta/type_name.hpp"
 
 namespace caf {
 namespace io {
@@ -47,6 +53,11 @@ public:
 
   constexpr accept_handle(const invalid_accept_handle_t&) {
     // nop
+  }
+
+  template <class Inspector>
+  friend error inspect(Inspector& f, accept_handle& x) {
+    return f(meta::type_name("accept_handle"), x.id_);
   }
 
 private:

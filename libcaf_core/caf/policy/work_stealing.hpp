@@ -27,61 +27,72 @@
 #include <cstddef>
 
 #include "caf/resumable.hpp"
+#include "caf/actor_system_config.hpp"
+
+#include "caf/policy/unprofiled.hpp"
 
 #include "caf/detail/double_ended_queue.hpp"
 
 namespace caf {
 namespace policy {
 
-/// Implements scheduling of actors via work stealing. This implementation uses
-/// two queues: a synchronized queue accessible by other threads and an internal
-/// queue. Access to the synchronized queue is minimized.
-/// The reasoning behind this design decision is that it
-/// has been shown that stealing actually is very rare for most workloads [1].
-/// Hence, implementations should focus on the performance in
-/// the non-stealing case. For this reason, each worker has an exposed
-/// job queue that can be accessed by the central scheduler instance as
-/// well as other workers, but it also has a private job list it is
-/// currently working on. To account for the load balancing aspect, each
-/// worker makes sure that at least one job is left in its exposed queue
-/// to allow other workers to steal it.
-///
-/// [1] http://dl.acm.org/citation.cfm?doid=2398857.2384639
-///
+/// Implements scheduling of actors via work stealing.
 /// @extends scheduler_policy
-class work_stealing {
+class work_stealing : public unprofiled {
 public:
-  // A thead-safe queue implementation.
+  ~work_stealing();
+
+  // A thread-safe queue implementation.
   using queue_type = detail::double_ended_queue<resumable>;
+
+  using usec = std::chrono::microseconds;
+
+  // configuration for aggressive/moderate/relaxed poll strategies.
+  struct poll_strategy {
+    size_t attempts;
+    size_t step_size;
+    size_t steal_interval;
+    usec sleep_duration;
+  };
 
   // The coordinator has only a counter for round-robin enqueue to its workers.
   struct coordinator_data {
-    std::atomic<size_t> next_worker;
-    inline coordinator_data() : next_worker(0) {
+    inline explicit coordinator_data(scheduler::abstract_coordinator*)
+        : next_worker(0) {
       // nop
     }
+
+    std::atomic<size_t> next_worker;
   };
 
   // Holds job job queue of a worker and a random number generator.
   struct worker_data {
+    inline explicit worker_data(scheduler::abstract_coordinator* p)
+        : rengine(std::random_device{}()),
+          // no need to worry about wrap-around; if `p->num_workers() < 2`,
+          // `uniform` will not be used anyway
+          uniform(0, p->num_workers() - 2),
+          strategies{
+            {p->system().config().work_stealing_aggressive_poll_attempts, 1,
+             p->system().config().work_stealing_aggressive_steal_interval,
+             usec{0}},
+            {p->system().config().work_stealing_moderate_poll_attempts, 1,
+             p->system().config().work_stealing_moderate_steal_interval,
+             usec{p->system().config().work_stealing_moderate_sleep_duration_us}},
+            {1, 0, p->system().config().work_stealing_relaxed_steal_interval,
+            usec{p->system().config().work_stealing_relaxed_sleep_duration_us}}
+          } {
+      // nop
+    }
+
     // This queue is exposed to other workers that may attempt to steal jobs
     // from it and the central scheduling unit can push new jobs to the queue.
     queue_type queue;
-    // needed by our engine
-    std::random_device rdevice;
     // needed to generate pseudo random numbers
     std::default_random_engine rengine;
-    // initialize random engine
-    inline worker_data() : rdevice(), rengine(rdevice()) {
-      // nop
-    }
+    std::uniform_int_distribution<size_t> uniform;
+    poll_strategy strategies[3];
   };
-
-  // Convenience function to access the data field.
-  template <class WorkerOrCoordinator>
-  static auto d(WorkerOrCoordinator* self) -> decltype(self->data()) {
-    return self->data();
-  }
 
   // Goes on a raid in quest for a shiny new job.
   template <class Worker>
@@ -92,7 +103,7 @@ public:
       return nullptr;
     }
     // roll the dice to pick a victim other than ourselves
-    size_t victim = d(self).rengine() % (p->num_workers() - 1);
+    auto victim = d(self).uniform(d(self).rengine);
     if (victim == self->id())
       victim = p->num_workers() - 1;
     // steal oldest element from the victim's queue
@@ -131,60 +142,26 @@ public:
     // on and poll every 10 ms; this strategy strives to minimize the
     // downside of "busy waiting", which still performs much better than a
     // "signalizing" implementation based on mutexes and conition variables
-    struct poll_strategy {
-      size_t attempts;
-      size_t step_size;
-      size_t steal_interval;
-      std::chrono::microseconds sleep_duration;
-    };
-    poll_strategy strategies[3] = {
-      // aggressive polling  (100x) without sleep interval
-      {100, 1, 10, std::chrono::microseconds{0}},
-      // moderate polling (500x) with 50 us sleep interval
-      {500, 1, 5,  std::chrono::microseconds{50}},
-      // relaxed polling (infinite attempts) with 10 ms sleep interval
-      {101, 0, 1,  std::chrono::microseconds{10000}}
-    };
+    auto& strategies = d(self).strategies;
     resumable* job = nullptr;
     for (auto& strat : strategies) {
       for (size_t i = 0; i < strat.attempts; i += strat.step_size) {
         job = d(self).queue.take_head();
-        if (job) {
+        if (job)
           return job;
-        }
         // try to steal every X poll attempts
         if ((i % strat.steal_interval) == 0) {
           job = try_steal(self);
-          if (job) {
+          if (job)
             return job;
-          }
         }
-        std::this_thread::sleep_for(strat.sleep_duration);
+        if (strat.sleep_duration.count() > 0)
+          std::this_thread::sleep_for(strat.sleep_duration);
       }
     }
     // unreachable, because the last strategy loops
     // until a job has been dequeued
     return nullptr;
-  }
-
-  template <class Worker>
-  void before_shutdown(Worker*) {
-    // nop
-  }
-
-  template <class Worker>
-  void before_resume(Worker*, resumable*) {
-    // nop
-  }
-
-  template <class Worker>
-  void after_resume(Worker*, resumable*) {
-    // nop
-  }
-
-  template <class Worker>
-  void after_completion(Worker*, resumable*) {
-    // nop
   }
 
   template <class Worker, class UnaryFunction>

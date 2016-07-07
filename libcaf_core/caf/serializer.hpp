@@ -22,95 +22,66 @@
 
 #include <string>
 #include <cstddef> // size_t
+#include <type_traits>
 
-#include "caf/uniform_typeid.hpp"
-#include "caf/uniform_type_info.hpp"
-#include "caf/primitive_variant.hpp"
+#include "caf/config.hpp"
+
+#ifndef CAF_NO_EXCEPTIONS
+#include <exception>
+#endif // CAF_NO_EXCEPTIONS
+
+#include "caf/fwd.hpp"
+#include "caf/data_processor.hpp"
 
 namespace caf {
 
-class actor_namespace;
-class uniform_type_info;
-
 /// @ingroup TypeSystem
 /// Technology-independent serialization interface.
-class serializer {
+class serializer : public data_processor<serializer> {
 public:
-  serializer(const serializer&) = delete;
-  serializer& operator=(const serializer&) = delete;
+  using super = data_processor<serializer>;
 
-  /// @note `addressing` must be guaranteed to outlive the serializer
-  serializer(actor_namespace* addressing = nullptr);
+  using is_saving = std::true_type;
+
+  using is_loading = std::false_type;
+
+  explicit serializer(actor_system& sys);
+
+  explicit serializer(execution_unit* ctx = nullptr);
 
   virtual ~serializer();
-
-  /// Begins serialization of an object of type `uti`.
-  virtual void begin_object(const uniform_type_info* uti) = 0;
-
-  /// Ends serialization of an object.
-  virtual void end_object() = 0;
-
-  /// Begins serialization of a sequence of size `num`.
-  virtual void begin_sequence(size_t num) = 0;
-
-  /// Ends serialization of a sequence.
-  virtual void end_sequence() = 0;
-
-  /// Writes a single value to the data sink.
-  /// @param value A primitive data value.
-  virtual void write_value(const primitive_variant& value) = 0;
-
-  /// Writes a raw block of data.
-  /// @param num_bytes The size of `data` in bytes.
-  /// @param data Raw data.
-  virtual void write_raw(size_t num_bytes, const void* data) = 0;
-
-  inline actor_namespace* get_namespace() {
-    return namespace_;
-  }
-
-  template <class T>
-  serializer& write(const T& val) {
-    write_value(val);
-    return *this;
-  }
-
-  template <class T>
-  serializer& write(const T& val, const uniform_type_info* uti) {
-    uti->serialize(&val, this);
-    return *this;
-  }
-
-private:
-  actor_namespace* namespace_;
 };
 
-/// Serializes a value to `s`.
-/// @relates serializer
-template <class T>
-typename std::enable_if<
-  detail::is_primitive<T>::value,
-  serializer&
->::type
-operator<<(serializer& sink, const T& value) {
-  return sink.write(value);
-}
+#ifndef CAF_NO_EXCEPTIONS
 
-/// Serializes a value to `s`.
-/// @relates serializer
 template <class T>
 typename std::enable_if<
-  ! detail::is_primitive<T>::value,
-  serializer&
+  std::is_same<
+    error,
+    decltype(std::declval<serializer&>().apply(std::declval<T&>()))
+  >::value
 >::type
-operator<<(serializer& sink, const T& value) {
-  return sink.write(value, uniform_typeid<T>());
+operator&(serializer& sink, const T& x) {
+  // implementations are required to never modify `x` while saving
+  auto e = sink.apply(const_cast<T&>(x));
+  if (e)
+    throw std::runtime_error(to_string(e));
 }
 
 template <class T>
-void operator&(serializer& sink, const T& value) {
-  sink << value;
+typename std::enable_if<
+  std::is_same<
+    error,
+    decltype(std::declval<serializer&>().apply(std::declval<T&>()))
+  >::value,
+  serializer&
+>::type
+operator<<(serializer& sink, const T& x) {
+  sink & x;
+  return sink;
 }
+
+#endif // CAF_NO_EXCEPTIONS
 
 } // namespace caf
 

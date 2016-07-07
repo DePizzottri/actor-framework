@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstring>
 #include <sstream>
+#include <iterator>
 
 #include "caf/config.hpp"
 #include "caf/node_id.hpp"
@@ -29,8 +30,7 @@
 #include "caf/string_algorithms.hpp"
 #include "caf/primitive_variant.hpp"
 
-#include "caf/detail/logging.hpp"
-#include "caf/detail/singletons.hpp"
+#include "caf/logger.hpp"
 #include "caf/detail/ripemd_160.hpp"
 #include "caf/detail/get_root_uuid.hpp"
 #include "caf/detail/get_process_id.hpp"
@@ -50,11 +50,11 @@ node_id::~node_id() {
   // nop
 }
 
-node_id::node_id(const invalid_node_id_t&) {
+node_id::node_id(const none_t&) {
   // nop
 }
 
-node_id& node_id::operator=(const invalid_node_id_t&) {
+node_id& node_id::operator=(const none_t&) {
   data_.reset();
   return *this;
 }
@@ -73,7 +73,7 @@ node_id::node_id(uint32_t procid, const host_id_type& hid)
   // nop
 }
 
-int node_id::compare(const invalid_node_id_t&) const {
+int node_id::compare(const none_t&) const {
   return data_ ? 1 : 0; // invalid instances are always smaller
 }
 
@@ -82,18 +82,20 @@ int node_id::compare(const node_id& other) const {
     return 0; // shortcut for comparing to self or identical instances
   if (! data_ != ! other.data_)
     return data_ ? 1 : -1; // invalid instances are always smaller
-  int tmp = strncmp(reinterpret_cast<const char*>(host_id().data()),
-                    reinterpret_cast<const char*>(other.host_id().data()),
-                    host_id_size);
-  return tmp != 0
-         ? tmp
-         : (process_id() < other.process_id()
-            ? -1
-            : (process_id() == other.process_id() ? 0 : 1));
+  // use mismatch instead of strncmp because the
+  // latter bails out on the first 0-byte
+  auto last = host_id().end();
+  auto ipair = std::mismatch(host_id().begin(), last, other.host_id().begin());
+  if (ipair.first == last)
+    return static_cast<int>(process_id())-static_cast<int>(other.process_id());
+  else if (*ipair.first < *ipair.second)
+    return -1;
+  else
+    return 1;
 }
 
 node_id::data::data() : pid_(0) {
-  // nop
+  memset(host_.data(), 0, host_.size());
 }
 
 node_id::data::data(uint32_t procid, host_id_type hid)
@@ -128,13 +130,20 @@ node_id::data::~data() {
   // nop
 }
 
-void node_id::data::stop() {
-  // nop
+bool node_id::data::valid() const {
+  auto is_zero = [](uint8_t x) { return x == 0; };
+  return pid_ != 0 && ! std::all_of(host_.begin(), host_.end(), is_zero);
 }
 
+namespace {
+
+std::atomic<uint8_t> system_id;
+
+} // <anonymous>
+
 // initializes singleton
-node_id::data* node_id::data::create_singleton() {
-  CAF_LOGF_TRACE("");
+intrusive_ptr<node_id::data> node_id::data::create_singleton() {
+  CAF_LOG_TRACE("");
   auto ifs = detail::get_mac_addresses();
   std::vector<std::string> macs;
   macs.reserve(ifs.size());
@@ -144,8 +153,14 @@ node_id::data* node_id::data::create_singleton() {
   auto hd_serial_and_mac_addr = join(macs, "") + detail::get_root_uuid();
   node_id::host_id_type nid;
   detail::ripemd_160(nid, hd_serial_and_mac_addr);
+  // TODO: redesign network layer, make node_id an opaque type, etc.
+  // this hack enables multiple actor systems in a single process
+  // by overriding the last byte in the node ID with the actor system "ID"
+  nid.back() = system_id.fetch_add(1);
   // note: pointer has a ref count of 1 -> implicitly held by detail::singletons
-  return new node_id::data(detail::get_process_id(), nid);
+  intrusive_ptr<data> result;
+  result.reset(new node_id::data(detail::get_process_id(), nid), false);
+  return result;
 }
 
 uint32_t node_id::process_id() const {
@@ -156,21 +171,21 @@ const node_id::host_id_type& node_id::host_id() const {
   return data_ ? data_->host_ : invalid_host_id;
 }
 
-void node_id::serialize(serializer& sink) const {
-  sink.write_raw(host_id().size(), host_id().data());
-  sink.write_value(process_id());
+node_id::operator bool() const {
+  return static_cast<bool>(data_);
 }
 
-void node_id::deserialize(deserializer& source) {
-  if (! data_ || ! data_->unique())
-    data_ = make_counted<data>();
-  source.read_raw(node_id::host_id_size, data_->host_.data());
-  data_->pid_ = source.read<uint32_t>();
-  auto is_zero = [](uint8_t value) { return value == 0; };
-  // no need to keep the data if this is invalid
-  if (data_->pid_ == 0
-      && std::all_of(data_->host_.begin(), data_->host_.end(), is_zero))
-    data_.reset();
+void node_id::swap(node_id& x) {
+  data_.swap(x.data_);
+}
+
+std::string to_string(const node_id& x) {
+  if (! x)
+    return "none";
+  return deep_to_string(meta::type_name("node_id"),
+                        x.process_id(),
+                        meta::hex_formatted(),
+                        x.host_id());
 }
 
 } // namespace caf
