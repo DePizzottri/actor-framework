@@ -8,7 +8,7 @@
 #     $ make
 #     $ make test
 #     $ make doc                       <-- this is a necessary step!
-#     $ scripts/obs-commit-version.sh
+#     $ scripts/obs-commit-version.sh [--nightly|--release]
 #
 # In brief, it performs the following steps:
 #
@@ -37,8 +37,6 @@ set -o nounset
 set -o errexit
 
 # Script configuration (yet unlikely to change in the future).
-confReleaseBranch="master"
-confNightlyBranch="develop"
 confReleaseProject="devel:libraries:caf"
 confNightlyProject="devel:libraries:caf:nightly"
 confReleasePackage="caf"
@@ -50,6 +48,11 @@ type osc >/dev/null 2>&1 || {
   exit 1
 }
 
+if [ "$#" -ne 1 ] ; then
+  echo "Either --release or --nightly option must be specified." >&2
+  exit 1
+fi
+
 sourceDir="$PWD"
 
 # Check if header exists.
@@ -58,9 +61,7 @@ if [ ! -f "$sourceDir/libcaf_core/caf/config.hpp" ] ; then
   exit 1
 fi
 
-if [ ! -d "$sourceDir/html" \
-  -o ! -f "$sourceDir/manual/manual.html"\
-  -o ! -f "$sourceDir/manual/manual.pdf" ] ; then
+if [ ! -f "$sourceDir/manual.pdf" ] ; then
   echo "Documentation must be generated before calling this script." >&2
   exit 1
 fi
@@ -72,25 +73,22 @@ versionMinor=$(echo "( $versionAsInt / 100 ) % 100" | bc)
 versionPatch=$(echo "$versionAsInt % 100" | bc)
 versionAsStr="$versionMajor.$versionMinor.$versionPatch"
 
-# Retrieve current branch from git.
-gitBranch=`git rev-parse --abbrev-ref HEAD`
-
-if [ "$gitBranch" = "$confReleaseBranch" ] ; then 
+if [ "$1" = "--release" ] ; then
   projectName="$confReleaseProject"
   packageName="$confReleasePackage"
   packageVersion="${versionAsStr}"
-elif [ "$gitBranch" = "$confNightlyBranch" ] ; then
+elif [ "$1" = "--nightly" ] ; then
   projectName="$confNightlyProject"
   packageName="$confNightlyPackage"
-  packageVersion="${versionAsStr}_$(date +%Y%m%d)"
+  packageVersion="${versionAsStr}.$(date +%Y%m%d)"
 else
   # Don't prevent other branches from building, but issue a warning.
-  echo "Not on '$confReleaseBranch' or '$confNightlyBranch' branch. Exitting." >&2
+  echo "Use with either '--nightly' or '--release'. Exitting." >&2
   exit
 fi
 
 packageFqn="$projectName/$packageName"
-sourceTarball="${versionAsStr}.tar.gz"
+sourceTarball="${packageVersion}.tar.gz"
 buildDir="$sourceDir/build"
 obsDir="$buildDir/obs-temp"
 
@@ -116,7 +114,11 @@ cd - >/dev/null
 osc add "$sourceTarball"
 
 # Fix package version and commit.
-sed -i.bk -E -e "s/^Version:([ ]+).+/Version:\1$packageVersion/g" "$packageName.spec"
-echo "[obs-commit-version] Comitting: $packageVersion, $gitBranch"
-osc commit -m "Automatic commit: $packageVersion, $gitBranch"
+sed -i.bk -E \
+  -e "s/^Version:([ ]+).+/Version:\1$packageVersion/g" \
+  "$packageName.spec" \
+  "$packageName.dsc"
+
+echo "[obs-commit-version] Comitting: $packageVersion, $1"
+osc commit -m "Automatic commit: $packageVersion, $1"
 

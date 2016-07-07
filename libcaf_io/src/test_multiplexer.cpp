@@ -19,6 +19,8 @@
 
 #include "caf/io/network/test_multiplexer.hpp"
 
+#include "caf/scheduler/abstract_coordinator.hpp"
+
 #include "caf/io/scribe.hpp"
 #include "caf/io/doorman.hpp"
 
@@ -26,14 +28,21 @@ namespace caf {
 namespace io {
 namespace network {
 
-test_multiplexer::~test_multiplexer() {
-  // nop
+test_multiplexer::test_multiplexer(actor_system* sys) : multiplexer(sys) {
+  CAF_ASSERT(sys != nullptr);
 }
 
-connection_handle test_multiplexer::new_tcp_scribe(const std::string& host,
-                                                   uint16_t desired_port) {
+test_multiplexer::~test_multiplexer() {
+  // get rid of extra ref count
+  for (auto& ptr : resumables_)
+    intrusive_ptr_release(ptr.get());
+}
+
+expected<connection_handle>
+test_multiplexer::new_tcp_scribe(const std::string& host, uint16_t port_hint) {
+  guard_type guard{mx_};
   connection_handle result;
-  auto i = scribes_.find(std::make_pair(host, desired_port));
+  auto i = scribes_.find(std::make_pair(host, port_hint));
   if (i != scribes_.end()) {
     result = i->second;
     scribes_.erase(i);
@@ -41,8 +50,8 @@ connection_handle test_multiplexer::new_tcp_scribe(const std::string& host,
   return result;
 }
 
-void test_multiplexer::assign_tcp_scribe(abstract_broker* ptr,
-                                         connection_handle hdl) {
+expected<void> test_multiplexer::assign_tcp_scribe(abstract_broker* ptr,
+                                                   connection_handle hdl) {
   class impl : public scribe {
   public:
     impl(abstract_broker* self, connection_handle ch, test_multiplexer* mpx)
@@ -55,6 +64,10 @@ void test_multiplexer::assign_tcp_scribe(abstract_broker* ptr,
       mpx_->read_config(hdl()) = config;
     }
 
+    void ack_writes(bool enable) override {
+      mpx_->ack_writes(hdl()) = enable;
+    }
+
     std::vector<char>& wr_buf() override {
       return mpx_->output_buffer(hdl());
     }
@@ -65,7 +78,7 @@ void test_multiplexer::assign_tcp_scribe(abstract_broker* ptr,
 
     void stop_reading() override {
       mpx_->stopped_reading(hdl()) = true;
-      detach(false);
+      detach(mpx_, false);
     }
 
     void flush() override {
@@ -73,19 +86,21 @@ void test_multiplexer::assign_tcp_scribe(abstract_broker* ptr,
     }
 
     std::string addr() const override {
-      return std::string{};
+      return "test";
     }
 
     uint16_t port() const override {
-      return 0;
+      return static_cast<uint16_t>(hdl().id());
     }
 
   private:
     test_multiplexer* mpx_;
   };
+  CAF_LOG_TRACE(CAF_ARG(hdl));
   auto sptr = make_counted<impl>(ptr, hdl, this);
   impl_ptr(hdl) = sptr;
   ptr->add_scribe(sptr);
+  return unit;
 }
 
 connection_handle test_multiplexer::add_tcp_scribe(abstract_broker*,
@@ -95,16 +110,17 @@ connection_handle test_multiplexer::add_tcp_scribe(abstract_broker*,
   abort();
 }
 
-connection_handle test_multiplexer::add_tcp_scribe(abstract_broker* ptr,
-                                                   const std::string& host,
-                                                   uint16_t desired_port) {
+expected<connection_handle>
+test_multiplexer::add_tcp_scribe(abstract_broker* ptr, const std::string& host,
+                                 uint16_t desired_port) {
   auto hdl = new_tcp_scribe(host, desired_port);
-  if (hdl != invalid_connection_handle)
-    assign_tcp_scribe(ptr, hdl);
+  if (! hdl)
+    return std::move(hdl.error());
+  assign_tcp_scribe(ptr, *hdl);
   return hdl;
 }
 
-std::pair<accept_handle, uint16_t>
+expected<std::pair<accept_handle, uint16_t>>
 test_multiplexer::new_tcp_doorman(uint16_t desired_port, const char*, bool) {
   accept_handle result;
   auto i = doormen_.find(desired_port);
@@ -112,11 +128,11 @@ test_multiplexer::new_tcp_doorman(uint16_t desired_port, const char*, bool) {
     result = i->second;
     doormen_.erase(i);
   }
-  return {result, desired_port};
+  return std::make_pair(result, desired_port);
 }
 
-void test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
-                                          accept_handle hdl) {
+expected<void> test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
+                                                    accept_handle hdl) {
   class impl : public doorman {
   public:
     impl(abstract_broker* self, accept_handle ah, test_multiplexer* mpx)
@@ -130,14 +146,14 @@ void test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
       auto i = mm.find(hdl());
       if (i != mm.end()) {
         msg().handle = i->second;
-        invoke_mailbox_element();
+        invoke_mailbox_element(mpx_);
         mm.erase(i);
       }
     }
 
     void stop_reading() override {
       mpx_->stopped_reading(hdl()) = true;
-      detach(false);
+      detach(mpx_, false);
     }
 
     void launch() override {
@@ -145,7 +161,7 @@ void test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
     }
 
     std::string addr() const override {
-      return std::string{};
+      return "test";
     }
 
     uint16_t port() const override {
@@ -158,6 +174,7 @@ void test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
   auto dptr = make_counted<impl>(ptr, hdl, this);
   impl_ptr(hdl) = dptr;
   ptr->add_doorman(dptr);
+  return unit;
 }
 
 accept_handle test_multiplexer::add_tcp_doorman(abstract_broker*,
@@ -167,14 +184,14 @@ accept_handle test_multiplexer::add_tcp_doorman(abstract_broker*,
   abort();
 }
 
-std::pair<accept_handle, uint16_t>
+expected<std::pair<accept_handle, uint16_t>>
 test_multiplexer::add_tcp_doorman(abstract_broker* ptr, uint16_t prt,
                                   const char* in, bool reuse_addr) {
   auto result = new_tcp_doorman(prt, in, reuse_addr);
-  if (result.first != invalid_accept_handle) {
-    port(result.first) = prt;
-    assign_tcp_doorman(ptr, result.first);
-  }
+  if (! result)
+    return std::move(result.error());
+  port(result->first) = prt;
+  assign_tcp_doorman(ptr, result->first);
   return result;
 }
 
@@ -189,6 +206,7 @@ void test_multiplexer::run() {
 
 void test_multiplexer::provide_scribe(std::string host, uint16_t desired_port,
                                       connection_handle hdl) {
+  guard_type guard{mx_};
   scribes_.emplace(std::make_pair(std::move(host), desired_port), hdl);
 }
 
@@ -217,6 +235,10 @@ test_multiplexer::input_buffer(connection_handle hdl) {
 
 receive_policy::config& test_multiplexer::read_config(connection_handle hdl) {
   return scribe_data_[hdl].recv_conf;
+}
+
+bool& test_multiplexer::ack_writes(connection_handle hdl) {
+  return scribe_data_[hdl].ack_writes;
 }
 
 bool& test_multiplexer::stopped_reading(connection_handle hdl) {
@@ -248,14 +270,14 @@ test_multiplexer::pending_connects_map& test_multiplexer::pending_connects() {
   return pending_connects_;
 }
 
-test_multiplexer::pending_scribes_map& test_multiplexer::pending_scribes() {
-  return scribes_;
+bool test_multiplexer::has_pending_scribe(std::string x, uint16_t y) {
+  guard_type guard{mx_};
+  return scribes_.count(std::make_pair(std::move(x), y)) > 0;
 }
-
 
 void test_multiplexer::accept_connection(accept_handle hdl) {
   auto& dd = doorman_data_[hdl];
-  if (dd.ptr == nullptr)
+  if (! dd.ptr)
     throw std::logic_error("accept_connection: this doorman was not "
                            "assigned to a broker yet");
   dd.ptr->new_connection();
@@ -264,6 +286,8 @@ void test_multiplexer::accept_connection(accept_handle hdl) {
 void test_multiplexer::read_data(connection_handle hdl) {
   flush_runnables();
   scribe_data& sd = scribe_data_[hdl];
+  while (! sd.ptr)
+    exec_runnable();
   switch (sd.recv_conf.first) {
     case receive_policy_flag::exactly:
       while (sd.xbuf.size() >= sd.recv_conf.second) {
@@ -272,14 +296,14 @@ void test_multiplexer::read_data(connection_handle hdl) {
         auto last = first + static_cast<ptrdiff_t>(sd.recv_conf.second);
         sd.rd_buf.insert(sd.rd_buf.end(), first, last);
         sd.xbuf.erase(first, last);
-        sd.ptr->consume(sd.rd_buf.data(), sd.rd_buf.size());
+        sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size());
       }
       break;
     case receive_policy_flag::at_least:
       if (sd.xbuf.size() >= sd.recv_conf.second) {
         sd.rd_buf.clear();
         sd.rd_buf.swap(sd.xbuf);
-        sd.ptr->consume(sd.rd_buf.data(), sd.rd_buf.size());
+        sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size());
       }
       break;
     case receive_policy_flag::at_most:
@@ -291,48 +315,52 @@ void test_multiplexer::read_data(connection_handle hdl) {
         auto last = (max_bytes < xbuf_size) ? first + max_bytes : sd.xbuf.end();
         sd.rd_buf.insert(sd.rd_buf.end(), first, last);
         sd.xbuf.erase(first, last);
-        sd.ptr->consume(sd.rd_buf.data(), sd.rd_buf.size());
+        sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size());
       }
   }
 }
 
 void test_multiplexer::virtual_send(connection_handle hdl,
                                     const buffer_type& buf) {
+  CAF_LOG_TRACE(CAF_ARG(hdl));
   auto& vb = virtual_network_buffer(hdl);
   vb.insert(vb.end(), buf.begin(), buf.end());
   read_data(hdl);
 }
 
 void test_multiplexer::exec_runnable() {
-  runnable_ptr ptr;
+  CAF_LOG_TRACE("");
+  resumable_ptr ptr;
   { // critical section
     guard_type guard{mx_};
-    while (runnables_.empty())
+    while (resumables_.empty())
       cv_.wait(guard);
-    runnables_.front().swap(ptr);
-    runnables_.pop_front();
+    resumables_.front().swap(ptr);
+    resumables_.pop_front();
   }
-  ptr->run();
+  exec(ptr);
 }
 
 bool test_multiplexer::try_exec_runnable() {
-  runnable_ptr ptr;
+  CAF_LOG_TRACE("");
+  resumable_ptr ptr;
   { // critical section
     guard_type guard{mx_};
-    if (runnables_.empty())
+    if (resumables_.empty())
       return false;
-    runnables_.front().swap(ptr);
-    runnables_.pop_front();
+    resumables_.front().swap(ptr);
+    resumables_.pop_front();
   }
-  ptr->run();
+  exec(ptr);
   return true;
 }
 
 void test_multiplexer::flush_runnables() {
+  CAF_LOG_TRACE("");
   // execute runnables in bursts, pick a small size to
   // minimize time in the critical section
   constexpr size_t max_runnable_count = 8;
-  std::vector<runnable_ptr> runnables;
+  std::vector<resumable_ptr> runnables;
   runnables.reserve(max_runnable_count);
   // runnables can create new runnables, so we need to double-check
   // that `runnables_` is empty after each burst
@@ -340,22 +368,48 @@ void test_multiplexer::flush_runnables() {
     runnables.clear();
     { // critical section
       guard_type guard{mx_};
-      while (! runnables_.empty() && runnables.size() < max_runnable_count) {
-        runnables.emplace_back(std::move(runnables_.front()));
-        runnables_.pop_front();
+      while (! resumables_.empty() && runnables.size() < max_runnable_count) {
+        runnables.emplace_back(std::move(resumables_.front()));
+        resumables_.pop_front();
       }
     }
     for (auto& ptr : runnables)
-      ptr->run();
+      exec(ptr);
   } while (! runnables.empty());
 }
 
-void test_multiplexer::dispatch_runnable(runnable_ptr ptr) {
-  std::list<runnable_ptr> tmp;
-  tmp.emplace_back(std::move(ptr));
-  guard_type guard{mx_};
-  runnables_.splice(runnables_.end(), std::move(tmp));
-  cv_.notify_all();
+void test_multiplexer::exec_later(resumable* ptr) {
+  CAF_ASSERT(ptr != nullptr);
+  CAF_LOG_TRACE("");
+  switch (ptr->subtype()) {
+    case resumable::io_actor:
+    case resumable::function_object: {
+      std::list<resumable_ptr> tmp;
+      tmp.emplace_back(ptr);
+      guard_type guard{mx_};
+      resumables_.splice(resumables_.end(), std::move(tmp));
+      cv_.notify_all();
+      break;
+    }
+    default:
+      system().scheduler().enqueue(ptr);
+  }
+}
+
+void test_multiplexer::exec(resumable_ptr& ptr) {
+  CAF_ASSERT(ptr != nullptr);
+  CAF_LOG_TRACE("");
+  switch (ptr->resume(this, 1)) {
+    case resumable::resume_later:
+      exec_later(ptr.get());
+      break;
+    case resumable::done:
+    case resumable::awaiting_message:
+      intrusive_ptr_release(ptr.get());
+      break;
+    default:
+      ; // ignored
+  }
 }
 
 } // namespace network

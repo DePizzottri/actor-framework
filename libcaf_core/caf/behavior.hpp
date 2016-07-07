@@ -71,6 +71,10 @@ public:
     impl_ = detail::make_behavior(xs...);
   }
 
+  inline void swap(behavior& other) {
+    impl_.swap(other.impl_);
+  }
+
   void assign(intrusive_ptr<detail::behavior_impl> ptr) {
     impl_.swap(ptr);
   }
@@ -93,8 +97,24 @@ public:
   }
 
   /// Runs this handler and returns its (optional) result.
-  inline optional<message> operator()(message& arg) {
-    return (impl_) ? impl_->invoke(arg) : none;
+  inline optional<message> operator()(message& xs) {
+    return impl_ ? impl_->invoke(xs) : none;
+  }
+
+  inline optional<message> operator()(type_erased_tuple& xs) {
+    return impl_ ? impl_->invoke(xs) : none;
+  }
+
+  /// Runs this handler with callback.
+  inline match_case::result operator()(detail::invoke_result_visitor& f,
+                                       type_erased_tuple& xs) {
+    return impl_ ? impl_->invoke(f, xs) : match_case::no_match;
+  }
+
+  /// Runs this handler with callback.
+  inline match_case::result operator()(detail::invoke_result_visitor& f,
+                                       message& xs) {
+    return impl_ ? impl_->invoke(f, xs) : match_case::no_match;
   }
 
   /// Checks whether this behavior is not empty.

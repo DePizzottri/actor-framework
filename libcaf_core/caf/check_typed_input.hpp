@@ -20,6 +20,7 @@
 #ifndef CAF_CHECK_TYPED_INPUT_HPP
 #define CAF_CHECK_TYPED_INPUT_HPP
 
+#include "caf/fwd.hpp"
 #include "caf/typed_actor.hpp"
 
 #include "caf/detail/type_list.hpp"
@@ -27,23 +28,68 @@
 
 namespace caf {
 
-/// Checks whether `R` does support an input of type `{Ts...}` via a
-/// static assertion (always returns 0).
-template <class... Sigs, class... Ts>
-void check_typed_input(const typed_actor<Sigs...>&,
-                       const detail::type_list<Ts...>&) {
-  static_assert(detail::tl_find<
-                  detail::type_list<Ts...>,
-                  atom_value
-                >::value == -1,
-                "atom(...) notation is not sufficient for static type "
-                "checking, please use atom_constant instead in this context");
-  static_assert(detail::tl_find_if<
-                  detail::type_list<Sigs...>,
-                  detail::input_is<detail::type_list<Ts...>>::template eval
-                >::value >= 0,
-                "typed actor does not support given input");
+template <class T>
+struct output_types_of {
+  // nop
+};
+
+template <class In, class Out>
+struct output_types_of<typed_mpi<In, Out>> {
+  using type = Out;
+};
+
+template <class T>
+struct signatures_of {
+  using type = typename std::remove_pointer<T>::type::signatures;
+};
+
+template <class T>
+constexpr bool statically_typed() {
+  return ! std::is_same<
+           none_t,
+           typename std::remove_pointer<T>::type::signatures
+         >::value;
 }
+
+template <class Signatures, class Input>
+struct actor_accepts_message;
+
+template <class Input>
+struct actor_accepts_message<none_t, Input> : std::true_type {};
+
+template <class... Ts, class Input>
+struct actor_accepts_message<detail::type_list<Ts...>, Input> 
+    : detail::tl_exists<detail::type_list<Ts...>, 
+                        detail::input_is<Input>::template eval> {};
+
+template <class Signatures, class Input>
+struct response_to;
+
+template <class Input>
+struct response_to<none_t, Input> {
+  using type = none_t;
+};
+
+template <class... Ts, class Input>
+struct response_to<detail::type_list<Ts...>, Input> {
+  using type =
+    typename output_types_of<
+      typename detail::tl_find<
+        detail::type_list<Ts...>,
+        detail::input_is<Input>::template eval
+      >::type
+    >::type;
+};
+
+template <class T>
+struct is_void_response : std::false_type {};
+
+template <>
+struct is_void_response<detail::type_list<void>> : std::true_type {};
+
+// true for the purpose of type checking performed by send()
+template <>
+struct is_void_response<none_t> : std::true_type {};
 
 } // namespace caf
 

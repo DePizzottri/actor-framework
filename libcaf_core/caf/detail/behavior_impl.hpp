@@ -21,7 +21,6 @@
 #define CAF_DETAIL_BEHAVIOR_IMPL_HPP
 
 #include <tuple>
-#include <iterator>
 #include <type_traits>
 
 #include "caf/none.hpp"
@@ -32,11 +31,10 @@
 #include "caf/intrusive_ptr.hpp"
 
 #include "caf/atom.hpp"
-#include "caf/either.hpp"
 #include "caf/message.hpp"
 #include "caf/duration.hpp"
 #include "caf/ref_counted.hpp"
-#include "caf/skip_message.hpp"
+#include "caf/skip.hpp"
 #include "caf/response_promise.hpp"
 #include "caf/timeout_definition.hpp"
 #include "caf/typed_response_promise.hpp"
@@ -45,23 +43,16 @@
 #include "caf/detail/apply_args.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/detail/tail_argument_token.hpp"
-#include "caf/detail/optional_message_visitor.hpp"
+#include "caf/detail/invoke_result_visitor.hpp"
 
 namespace caf {
 
 class message_handler;
-using bhvr_invoke_result = optional<message>;
 
 } // namespace caf
 
 namespace caf {
 namespace detail {
-
-template <class... Ts>
-struct has_skip_message {
-  static constexpr bool value =
-    disjunction<std::is_same<Ts, skip_message_t>::value...>::value;
-};
 
 class behavior_impl : public ref_counted {
 public:
@@ -71,12 +62,16 @@ public:
 
   behavior_impl(duration tout = duration{});
 
-  bhvr_invoke_result invoke(message&);
+  virtual match_case::result invoke_empty(detail::invoke_result_visitor& f);
 
-  inline bhvr_invoke_result invoke(message&& x) {
-    message tmp(std::move(x));
-    return invoke(tmp);
-  }
+  virtual match_case::result invoke(detail::invoke_result_visitor& f,
+                                    type_erased_tuple& xs);
+
+  match_case::result invoke(detail::invoke_result_visitor& f, message& xs);
+
+  optional<message> invoke(message&);
+
+  optional<message> invoke(type_erased_tuple&);
 
   virtual void handle_timeout();
 
@@ -88,178 +83,174 @@ public:
 
   pointer or_else(const pointer& other);
 
-  using iterator = match_case_info*;
-
-  inline iterator begin() {
-    return begin_;
-  }
-
-  inline iterator end() {
-    return end_;
-  }
-
-  inline size_t size() const {
-    return std::distance(begin_, end_);
-  }
-
 protected:
-  iterator begin_;
-  iterator end_;
   duration timeout_;
+  match_case_info* begin_;
+  match_case_info* end_;
 };
-
-template <size_t Pos, size_t Size>
-struct defaut_bhvr_impl_init {
-  template <class Array, class Tuple>
-  static void init(Array& arr, Tuple& tup) {
-    auto& x = arr[Pos];
-    x.ptr = &std::get<Pos>(tup);
-    x.has_wildcard = x.ptr->has_wildcard();
-    x.type_token = x.ptr->type_token();
-    defaut_bhvr_impl_init<Pos + 1, Size>::init(arr, tup);
-  }
-};
-
-template <size_t Size>
-struct defaut_bhvr_impl_init<Size, Size> {
-  template <class Array, class Tuple>
-  static void init(Array&, Tuple&) {
-    // nop
-  }
-};
-
 
 template <class Tuple>
-class default_behavior_impl : public behavior_impl {
-public:
-  static constexpr size_t num_cases = std::tuple_size<Tuple>::value;
-
-  template <class T>
-  default_behavior_impl(const T& tup) : cases_(std::move(tup)) {
-    init();
-  }
-
-  template <class T, class F>
-  default_behavior_impl(const T& tup, const timeout_definition<F>& d)
-      : behavior_impl(d.timeout),
-        cases_(tup),
-        fun_(d.handler) {
-    init();
-  }
-
-  typename behavior_impl::pointer
-  copy(const generic_timeout_definition& tdef) const override {
-    return make_counted<default_behavior_impl<Tuple>>(cases_, tdef);
-  }
-
-  void handle_timeout() override {
-    fun_();
-  }
-
-private:
-  void init() {
-    defaut_bhvr_impl_init<0, num_cases>::init(arr_, cases_);
-    begin_ = arr_.data();
-    end_ = begin_ + arr_.size();
-  }
-
-  Tuple cases_;
-  std::array<match_case_info, num_cases> arr_;
-  std::function<void()> fun_;
-};
-
-// eor = end of recursion
-// ra  = reorganize arguments
-
-template <class R, class... Ts>
-intrusive_ptr<R> make_behavior_eor(const std::tuple<Ts...>& match_cases) {
-  return make_counted<R>(match_cases);
+void call_timeout_handler(Tuple& tup, std::true_type) {
+  auto& f = std::get<std::tuple_size<Tuple>::value - 1>(tup);
+  f.handler();
 }
 
-template <class R, class... Ts, class F>
-intrusive_ptr<R> make_behavior_eor(const std::tuple<Ts...>& match_cases,
-                                   const timeout_definition<F>& td) {
-  return make_counted<R>(match_cases, td);
+template <class Tuple>
+void call_timeout_handler(Tuple&, std::false_type) {
+  // nop
 }
 
-template <class F, bool IsMC = std::is_base_of<match_case, F>::value>
-struct lift_to_mctuple {
-  using type = std::tuple<trivial_match_case<F>>;
+template <class T, bool IsTimeout = is_timeout_definition<T>::value>
+struct lift_behavior {
+  using type = trivial_match_case<T>;
 };
 
 template <class T>
-struct lift_to_mctuple<T, true> {
-  using type = std::tuple<T>;
-};
-
-template <class... Ts>
-struct lift_to_mctuple<std::tuple<Ts...>, false> {
-  using type = std::tuple<Ts...>;
-};
-
-template <class F>
-struct lift_to_mctuple<timeout_definition<F>, false> {
-  using type = std::tuple<>;
-};
-
-template <class T, class... Ts>
-struct join_std_tuples;
-
-template <class T>
-struct join_std_tuples<T> {
+struct lift_behavior<T, true> {
   using type = T;
 };
 
-template <class... Prefix, class... Infix, class... Suffix>
-struct join_std_tuples<std::tuple<Prefix...>, std::tuple<Infix...>, Suffix...>
-    : join_std_tuples<std::tuple<Prefix..., Infix...>, Suffix...> {
-  // nop
+template <bool HasTimeout, class Tuple>
+struct with_generic_timeout;
+
+template <class... Ts>
+struct with_generic_timeout<false, std::tuple<Ts...>> {
+  using type = std::tuple<Ts..., generic_timeout_definition>;
 };
 
-// this function reorganizes its arguments to shift the timeout definition
-// to the front (receives it at the tail)
-template <class R, class F, class... Ts>
-intrusive_ptr<R> make_behavior_ra(const timeout_definition<F>& td,
-                                  const tail_argument_token&, const Ts&... xs) {
-  return make_behavior_eor<R>(std::tuple_cat(to_match_case_tuple(xs)...), td);
-}
-
-template <class R, class... Ts>
-intrusive_ptr<R> make_behavior_ra(const tail_argument_token&, const Ts&... xs) {
-  return make_behavior_eor<R>(std::tuple_cat(to_match_case_tuple(xs)...));
-}
-
-// for some reason, this call is ambigious on GCC without enable_if
-template <class R, class T, class... Ts>
-typename std::enable_if<
-  ! std::is_same<T, tail_argument_token>::value,
-  intrusive_ptr<R>
->::type
-make_behavior_ra(const T& x, const Ts&... xs) {
-  return make_behavior_ra<R>(xs..., x);
-}
-
-// this function reorganizes its arguments to shift the timeout definition
-// to the front (receives it at the tail)
 template <class... Ts>
-intrusive_ptr<
-  default_behavior_impl<
-    typename join_std_tuples<
-      typename lift_to_mctuple<Ts>::type...
-    >::type
-  >>
-make_behavior(const Ts&... xs) {
-  using result_type =
-    default_behavior_impl<
-      typename join_std_tuples<
-        typename lift_to_mctuple<Ts>::type...
-      >::type
-    >;
-  tail_argument_token eoa;
-  return make_behavior_ra<result_type>(xs..., eoa);
+struct with_generic_timeout<true, std::tuple<Ts...>> {
+  using type =
+    typename tl_apply<
+      typename tl_replace_back<
+        type_list<Ts...>,
+        generic_timeout_definition
+      >::type,
+      std::tuple
+    >::type;
+};
+
+template <class Tuple>
+class default_behavior_impl;
+
+template <class... Ts>
+class default_behavior_impl<std::tuple<Ts...>> : public behavior_impl {
+public:
+  using tuple_type = std::tuple<Ts...>;
+
+  using back_type = typename tl_back<type_list<Ts...>>::type;
+
+  static constexpr bool has_timeout = is_timeout_definition<back_type>::value;
+
+  static constexpr size_t num_cases = sizeof...(Ts) - (has_timeout ? 1 : 0);
+
+  using cases =
+    typename std::conditional<
+      has_timeout,
+      typename tl_pop_back<type_list<Ts...>>::type,
+      type_list<Ts...>
+    >::type;
+
+  default_behavior_impl(tuple_type&& tup) : cases_(std::move(tup)) {
+    init();
+  }
+
+  template <class... Us>
+  default_behavior_impl(Us&&... xs) : cases_(std::forward<Us>(xs)...) {
+    init();
+  }
+
+  void handle_timeout() override {
+    std::integral_constant<bool, has_timeout> token;
+    call_timeout_handler(cases_, token);
+  }
+
+  typename behavior_impl::pointer
+  copy(const generic_timeout_definition& td) const override;
+
+private:
+  void init() {
+    std::integral_constant<size_t, 0> first;
+    std::integral_constant<size_t, num_cases> last;
+    init(first, last);
+  }
+
+  template <size_t Last>
+  void init(std::integral_constant<size_t, Last>,
+            std::integral_constant<size_t, Last>) {
+    this->begin_ = arr_.data();
+    this->end_ = arr_.data() + arr_.size();
+    std::integral_constant<bool, has_timeout> token;
+    set_timeout(token);
+  }
+
+  template <size_t First, size_t Last>
+  void init(std::integral_constant<size_t, First>,
+            std::integral_constant<size_t, Last> last) {
+    auto& element = std::get<First>(cases_);
+    arr_[First] = match_case_info{element.type_token(), &element};
+    init(std::integral_constant<size_t, First + 1>{}, last);
+  }
+
+  void set_timeout(std::true_type) {
+    this->timeout_ = std::get<num_cases>(cases_).timeout;
+  }
+
+  void set_timeout(std::false_type) {
+    // nop
+  }
+
+  tuple_type cases_;
+  std::array<match_case_info, num_cases> arr_;
+};
+
+template <class Tuple>
+struct behavior_factory {
+  template <class... Ts>
+  typename behavior_impl::pointer operator()(Ts&&... xs) const {
+    return make_counted<default_behavior_impl<Tuple>>(std::forward<Ts>(xs)...);
+  }
+};
+
+template <class... Ts>
+typename behavior_impl::pointer
+default_behavior_impl<std::tuple<Ts...>>::copy(const generic_timeout_definition& td) const {
+  using tuple_type = typename with_generic_timeout<has_timeout, std::tuple<Ts...>>::type;
+  behavior_factory<tuple_type> factory;// = &make_counted<default_behavior_impl<tuple_type>>;
+  typename il_range<0, num_cases>::type indices;
+  return apply_args_suffxied(factory, indices, cases_, td);
 }
+
+struct make_behavior_t {
+  constexpr make_behavior_t() {
+    // nop
+  }
+
+  template <class... Ts>
+  intrusive_ptr<default_behavior_impl<std::tuple<typename lift_behavior<Ts>::type...>>>
+  operator()(Ts... xs) const {
+    using type = default_behavior_impl<std::tuple<typename lift_behavior<Ts>::type...>>;
+    return make_counted<type>(std::move(xs)...);
+  }
+};
+
+constexpr make_behavior_t make_behavior = make_behavior_t{};
 
 using behavior_impl_ptr = intrusive_ptr<behavior_impl>;
+
+// utility for getting a type-erased version of make_behavior
+struct make_behavior_impl_t {
+  constexpr make_behavior_impl_t() {
+    // nop
+  }
+
+  template <class... Ts>
+  behavior_impl_ptr operator()(Ts&&... xs) const {
+    return make_behavior(std::forward<Ts>(xs)...);
+  }
+};
+
+constexpr make_behavior_impl_t make_behavior_impl = make_behavior_impl_t{};
 
 } // namespace detail
 } // namespace caf

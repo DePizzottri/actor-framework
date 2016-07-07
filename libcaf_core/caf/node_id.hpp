@@ -34,8 +34,6 @@
 
 namespace caf {
 
-class serializer;
-
 /// Objects of this type identify an invalid `node_id`.
 /// @relates node_id
 struct invalid_node_id_t {
@@ -51,8 +49,7 @@ constexpr invalid_node_id_t invalid_node_id = invalid_node_id_t{};
 /// A node ID consists of a host ID and process ID. The host ID identifies
 /// the physical machine in the network, whereas the process ID identifies
 /// the running system-level process on that machine.
-class node_id : detail::comparable<node_id>,
-                detail::comparable<node_id, invalid_node_id_t> {
+class node_id {
 public:
   ~node_id();
 
@@ -94,11 +91,12 @@ public:
   ///      and the UUID of the root partition (mounted in "/" or "C:").
   const host_id_type& host_id() const;
 
+  /// Queries whether this node is not default-constructed.
+  explicit operator bool() const;
+
+  void swap(node_id&);
+
   /// @cond PRIVATE
-
-  void serialize(serializer& sink) const;
-
-  void deserialize(deserializer& source);
 
   // A reference counted container for host ID and process ID.
   class data : public ref_counted {
@@ -116,7 +114,7 @@ public:
       // nop
     }
 
-    static data* create_singleton();
+    static intrusive_ptr<data> create_singleton();
 
     int compare(const node_id& other) const;
 
@@ -141,11 +139,40 @@ public:
 
   explicit node_id(intrusive_ptr<data> dataptr);
 
+  friend void serialize(serializer& sink, node_id& x, const unsigned int);
+
+  friend void serialize(deserializer& source, node_id& x, const unsigned int);
+
+  void from_string(const std::string& str);
+
   /// @endcond
 
 private:
   intrusive_ptr<data> data_;
 };
+
+inline bool operator==(const node_id& lhs, const node_id& rhs) {
+  return lhs.compare(rhs) == 0;
+}
+
+inline bool operator==(const node_id& lhs, invalid_node_id_t) {
+  return ! static_cast<bool>(lhs);
+}
+
+inline bool operator!=(const node_id& lhs, const node_id& rhs) {
+  return ! (lhs == rhs);
+}
+
+inline bool operator!=(const node_id& lhs, invalid_node_id_t) {
+  return static_cast<bool>(lhs);
+}
+
+inline bool operator<(const node_id& lhs, const node_id& rhs) {
+  return lhs.compare(rhs) < 0;
+}
+
+/// @relates node_id
+std::string to_string(const node_id& x);
 
 } // namespace caf
 

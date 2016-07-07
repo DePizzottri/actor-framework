@@ -17,49 +17,23 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#include "caf/all.hpp"
-#include "caf/message.hpp"
 #include "caf/abstract_group.hpp"
-#include "caf/detail/shared_spinlock.hpp"
 
-#include "caf/detail/group_manager.hpp"
-#include "caf/detail/singletons.hpp"
+#include "caf/group.hpp"
+#include "caf/message.hpp"
+#include "caf/actor_cast.hpp"
+#include "caf/group_module.hpp"
+#include "caf/group_manager.hpp"
+#include "caf/detail/shared_spinlock.hpp"
 
 namespace caf {
 
-abstract_group::module::module(std::string mname) : name_(std::move(mname)) {
-  // nop
-}
-
-void abstract_group::module::stop() {
-  // nop
-}
-
-const std::string& abstract_group::module::name() const {
-  return name_;
-}
-
-abstract_group::abstract_group(abstract_group::module_ptr mod,
-                               std::string id, const node_id& nid)
-    : abstract_channel(abstract_channel::is_abstract_group_flag, nid),
-      module_(mod),
-      identifier_(std::move(id)) {
-  // nop
-}
-
-const std::string& abstract_group::identifier() const {
-  return identifier_;
-}
-
-abstract_group::module_ptr abstract_group::get_module() const {
-  return module_;
-}
-
-const std::string& abstract_group::module_name() const {
-  return get_module()->name();
-}
-
-abstract_group::module::~module() {
+abstract_group::abstract_group(group_module& mod, std::string id, node_id nid)
+    : abstract_channel(abstract_channel::is_abstract_group_flag),
+      system_(mod.system()),
+      parent_(mod),
+      identifier_(std::move(id)),
+      origin_(std::move(nid)) {
   // nop
 }
 

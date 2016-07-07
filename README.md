@@ -8,6 +8,8 @@ network transparent messaging, and more.
 (https://gitter.im/actor-framework/chat)
 [![Jenkins][jenkins-badge]]
 (https://jenkins.inet.haw-hamburg.de/view/CAF%20Dashboard)
+[![Documentation Status][docs-badge]]
+(http://actor-framework.readthedocs.io/en/latest/?badge=latest)
 [![Coverity][coverity-badge]]
 (https://scan.coverity.com/projects/5555)
 [![In Progress][in-progress-badge]]
@@ -15,15 +17,25 @@ network transparent messaging, and more.
 [![Fixed in Develop][fixed-in-develop-badge]]
 (https://waffle.io/actor-framework/actor-framework)
 
-## On the Web
+## Community
 
 * __Chat__: https://gitter.im/actor-framework/chat
+* __Mailing List__: https://groups.google.com/d/forum/actor-framework
+* __Twitter__: https://twitter.com/actor_framework
+
+## Online Resources
+
 * __Homepage__: http://www.actor-framework.org
 * __Developer Blog__: http://blog.actor-framework.org
-* __Doxygen (HTML)__: http://www.actor-framework.org/doc
-* __Manual (HTML)__: http://www.actor-framework.org/manual
-* __Manual (PDF)__: http://www.actor-framework.org/pdf/manual.pdf
-* __Mailing List__: https://groups.google.com/d/forum/actor-framework
+* __Doxygen__: http://www.actor-framework.org/doc
+* __HTML Manual__: https://actor-framework.readthedocs.io
+* __PDF Manual (stable)__: http://www.actor-framework.org/pdf/manual.pdf
+* __PDF Manual (latest)__: http://www.actor-framework.org/develop/pdf/manual.pdf
+
+## Report Bugs / Get Help
+
+* __Open Issues on GitHub__: https://github.com/actor-framework/actor-framework/issues/new
+* __Ask Questions on StackOverflow__: https://stackoverflow.com/questions/ask?tags=c%2b%2b-actor-framework
 
 ## Get CAF
 
@@ -68,39 +80,6 @@ Alternatively, you can use the development branch by using:
 
 ```sh
 brew install caf --HEAD
-```
-
-### Biicode
-
-The official CAF channel is published under
-[caf_bot/actor-framework](https://www.biicode.com/caf_bot/actor-framework)
-and includes the following blocks:
-
-* libcaf_core
-* libcaf_io
-* libcaf_riac
-* libcaf_opencl (*depends on OpenCL which is not distributed as part of CAF*)
-
-**NOTE:** You do not need to have CAF installed on your
-machine. Biicode will automatically do that for you during the build process.
-Visit this the [bii guide](http://docs.biicode.com/c++/gettingstarted.html)
-for more information.
-
-To use actor-framework in your project, reference the header file as:
-`#include "caf_bot/actor-framework/libcaf_core/caf/all.hpp"`. Then run
-`bii find` to resolve and download the files and `bii build`
-to compile your code.
-
-To avoid specifying the block name in your includes add the following to your
-`bii.conf` file to allow Biicode to associate all `#include "caf/*.hpp"`
-with the actor-framework block:
-
-```ini
-[includes]
-  caf/riac/*.hpp : caf_bot/actor-framework/libcaf_riac
-  caf/opencl/*.hpp : caf_bot/actor-framework/libcaf_opencl
-  caf/io/*.hpp : caf_bot/actor-framework/libcaf_io
-  caf/*.hpp : caf_bot/actor-framework/libcaf_core
 ```
 
 ## Get the Sources
@@ -163,22 +142,35 @@ A SNocs workspace is provided by GitHub user
 
 ## Scientific Use
 
-If you use CAF in a scientific context, please use the following citation:
+If you use CAF in a scientific context, please use one of the following citations:
 
 ```latex
-@inproceedings{chs-ccafs-14,
-  author = {Dominik Charousset and Raphael Hiesgen and Thomas C. Schmidt},
-  title = {{CAF - The C++ Actor Framework for Scalable and Resource-efficient Applications}},
-  booktitle = {Proc. of the 5th ACM SIGPLAN Conf. on Systems, Programming, and Applications (SPLASH '14), Workshop AGERE!},
+@inproceedings{cshw-nassp-13,
+  author = {Dominik Charousset and Thomas C. Schmidt and Raphael Hiesgen and Matthias W{\"a}hlisch},
+  title = {{Native Actors -- A Scalable Software Platform for Distributed, Heterogeneous Environments}},
+  booktitle = {Proc. of the 4rd ACM SIGPLAN Conference on Systems, Programming, and Applications (SPLASH '13), Workshop AGERE!},
+  pages = {87--96},
   month = {Oct.},
-  year = {2014},
+  year = {2013},
   publisher = {ACM},
-  address = {New York, NY, USA},
-  location = {Portland, OR},
+  address = {New York, NY, USA}
+}
+
+@article{chs-rapc-16,
+  author = {Dominik Charousset and Raphael Hiesgen and Thomas C. Schmidt},
+  title = {{Revisiting Actor Programming in C++}},
+  journal = {Computer Languages, Systems \& Structures},
+  volume = {45},
+  year = {2016},
+  month = "April",
+  pages = {105--131},
+  publisher = {Elsevier}
 }
 ```
 
-You will find the paper online at http://dx.doi.org/10.1145/2687357.2687363
+You can find the papers online at
+http://dx.doi.org/10.1145/2541329.2541336 and
+http://dx.doi.org/10.1016/j.cl.2016.01.002.
 
 [obs]:
 https://software.opensuse.org/download.html?project=devel%3Alibraries%3Acaf&package=caf
@@ -194,6 +186,9 @@ https://software.opensuse.org/download.html?project=devel%3Alibraries%3Acaf%3Ani
 
 [jenkins-badge]:
 https://jenkins.inet.haw-hamburg.de/buildStatus/icon?job=CAF/master%20branch
+
+[docs-badge]:
+https://readthedocs.org/projects/actor-framework/badge/?version=latest
 
 [coverity-badge]:
 https://scan.coverity.com/projects/5555/badge.svg?flat=1

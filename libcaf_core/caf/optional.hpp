@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2014                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -26,51 +26,42 @@
 #include "caf/none.hpp"
 #include "caf/unit.hpp"
 #include "caf/config.hpp"
+#include "caf/deep_to_string.hpp"
 
 #include "caf/detail/safe_equal.hpp"
 
 namespace caf {
 
-/// Represents an optional value of `T`.
+/// A since C++17 compatible `optional` implementation.
 template <class T>
 class optional {
-public:
+ public:
   /// Typdef for `T`.
   using type = T;
 
-  /// Creates an empty instance with `valid() == false`.
-  optional(const none_t& = none) : valid_(false) {
+  /// Creates an instance without value.
+  optional(const none_t& = none) : m_valid(false) {
     // nop
   }
 
   /// Creates an valid instance from `value`.
-  optional(T value) : valid_(false) {
-    cr(std::move(value));
+  template <class U,
+            class E = typename std::enable_if<
+                        std::is_convertible<U, T>::value
+                      >::type>
+  optional(U x) : m_valid(false) {
+    cr(std::move(x));
   }
 
-  template <class U>
-  optional(const optional<U>& other) : valid_(false) {
-    if (other.valid()) {
-      cr(other.get());
+  optional(const optional& other) : m_valid(false) {
+    if (other.m_valid) {
+      cr(other.m_value);
     }
   }
 
-  template <class U>
-  optional(optional<U>&& other) : valid_(false) {
-    if (other.valid()) {
-      cr(std::move(other.get()));
-    }
-  }
-
-  optional(const optional& other) : valid_(false) {
-    if (other.valid_) {
-      cr(other.value_);
-    }
-  }
-
-  optional(optional&& other) : valid_(false) {
-    if (other.valid_) {
-      cr(std::move(other.value_));
+  optional(optional&& other) : m_valid(false) {
+    if (other.m_valid) {
+      cr(std::move(other.m_value));
     }
   }
 
@@ -79,247 +70,407 @@ public:
   }
 
   optional& operator=(const optional& other) {
-    if (valid_) {
-      if (other.valid_) value_ = other.value_;
+    if (m_valid) {
+      if (other.m_valid) m_value = other.m_value;
       else destroy();
     }
-    else if (other.valid_) {
-      cr(other.value_);
+    else if (other.m_valid) {
+      cr(other.m_value);
     }
     return *this;
   }
 
   optional& operator=(optional&& other) {
-    if (valid_) {
-      if (other.valid_) value_ = std::move(other.value_);
+    if (m_valid) {
+      if (other.m_valid) m_value = std::move(other.m_value);
       else destroy();
     }
-    else if (other.valid_) {
-      cr(std::move(other.value_));
+    else if (other.m_valid) {
+      cr(std::move(other.m_value));
     }
     return *this;
   }
 
-  /// Queries whether this instance holds a value.
-  bool valid() const {
-    return valid_;
-  }
-
-  /// Returns `!valid()`.
-  bool empty() const {
-    return ! valid_;
-  }
-
-  /// Returns `valid()`.
+  /// Checks whether this object contains a value.
   explicit operator bool() const {
-    return valid();
+    return m_valid;
   }
 
-  /// Returns `!valid()`.
+  /// Checks whether this object does not contain a value.
   bool operator!() const {
-    return ! valid();
+    return ! m_valid;
   }
 
   /// Returns the value.
   T& operator*() {
-    CAF_ASSERT(valid());
-    return value_;
+    CAF_ASSERT(m_valid);
+    return m_value;
   }
 
   /// Returns the value.
   const T& operator*() const {
-    CAF_ASSERT(valid());
-    return value_;
+    CAF_ASSERT(m_valid);
+    return m_value;
   }
 
   /// Returns the value.
   const T* operator->() const {
-    CAF_ASSERT(valid());
-    return &value_;
+    CAF_ASSERT(m_valid);
+    return &m_value;
   }
 
   /// Returns the value.
   T* operator->() {
-    CAF_ASSERT(valid());
-    return &value_;
+    CAF_ASSERT(m_valid);
+    return &m_value;
   }
 
   /// Returns the value.
-  T& get() {
-    CAF_ASSERT(valid());
-    return value_;
+  T& value() {
+    CAF_ASSERT(m_valid);
+    return m_value;
   }
 
   /// Returns the value.
-  const T& get() const {
-    CAF_ASSERT(valid());
-    return value_;
+  const T& value() const {
+    CAF_ASSERT(m_valid);
+    return m_value;
   }
 
-  /// Returns the value if `valid()`, otherwise returns `default_value`.
-  const T& get_or_else(const T& default_value) const {
-    return valid() ? get() : default_value;
+  /// Returns the value if `m_valid`, otherwise returns `default_value`.
+  const T& value_or(const T& default_value) const {
+    return m_valid ? value() : default_value;
   }
 
-private:
+ private:
   void destroy() {
-    if (valid_) {
-      value_.~T();
-      valid_ = false;
+    if (m_valid) {
+      m_value.~T();
+      m_valid = false;
     }
   }
+
   template <class V>
-  void cr(V&& value) {
-    CAF_ASSERT(! valid());
-    valid_ = true;
-    new (&value_) T(std::forward<V>(value));
+  void cr(V&& x) {
+    CAF_ASSERT(! m_valid);
+    m_valid = true;
+    new (&m_value) T(std::forward<V>(x));
   }
-  bool valid_;
-  union { T value_; };
+
+  bool m_valid;
+  union { T m_value; };
 };
 
-/// Template specialization to allow `optional`
-/// to hold a reference rather than an actual value.
+/// Template specialization to allow `optional` to hold a reference
+/// rather than an actual value with minimal overhead.
 template <class T>
 class optional<T&> {
-public:
+ public:
   using type = T;
 
-  optional(const none_t& = none) : value_(nullptr) {
+  optional(const none_t& = none) : m_value(nullptr) {
     // nop
   }
 
-  optional(T& value) : value_(&value) {
+  optional(T& x) : m_value(&x) {
     // nop
-  }
-
-  template <class U>
-  optional(const optional<U>& value) {
-    if (value)
-      value_ = &value.get();
-    else
-      value_ = nullptr;
   }
 
   optional(const optional& other) = default;
 
   optional& operator=(const optional& other) = default;
 
-  bool valid() const {
-    return value_ != nullptr;
-  }
-
-  bool empty() const {
-    return ! valid();
-  }
-
   explicit operator bool() const {
-    return valid();
+    return m_value != nullptr;
   }
 
   bool operator!() const {
-    return ! valid();
+    return ! m_value;
   }
 
   T& operator*() {
-    CAF_ASSERT(valid());
-    return *value_;
+    CAF_ASSERT(m_value);
+    return *m_value;
   }
 
   const T& operator*() const {
-    CAF_ASSERT(valid());
-    return *value_;
+    CAF_ASSERT(m_value);
+    return *m_value;
   }
 
   T* operator->() {
-    CAF_ASSERT(valid());
-    return value_;
+    CAF_ASSERT(m_value);
+    return m_value;
   }
 
   const T* operator->() const {
-    CAF_ASSERT(valid());
-    return value_;
+    CAF_ASSERT(m_value);
+    return m_value;
   }
 
-  T& get() {
-    CAF_ASSERT(valid());
-    return *value_;
+  T& value() {
+    CAF_ASSERT(m_value);
+    return *m_value;
   }
 
-  const T& get() const {
-    CAF_ASSERT(valid());
-    return *value_;
+  const T& value() const {
+    CAF_ASSERT(m_value);
+    return *m_value;
   }
 
-  const T& get_or_else(const T& default_value) const {
-    if (valid()) return get();
+  const T& value_or(const T& default_value) const {
+    if (m_value)
+      return value();
     return default_value;
   }
 
-private:
-  T* value_;
+ private:
+  T* m_value;
 };
 
-/// @relates optional
-template <class T, typename U>
-bool operator==(const optional<T>& lhs, const optional<U>& rhs) {
-  if ((lhs) && (rhs)) {
-    return detail::safe_equal(*lhs, *rhs);
+template <>
+class optional<void> {
+ public:
+  optional(none_t = none) : m_value(false) {
+    // nop
   }
-  return ! lhs && ! rhs;
+
+  optional(unit_t) : m_value(true) {
+    // nop
+  }
+
+  optional(const optional& other) = default;
+
+  optional& operator=(const optional& other) = default;
+
+  explicit operator bool() const {
+    return m_value;
+  }
+
+  bool operator!() const {
+    return ! m_value;
+  }
+
+ private:
+  bool m_value;
+};
+
+
+/// @relates optional
+template <class T>
+std::string to_string(const optional<T>& x) {
+  return x ? "!" + deep_to_string(*x) : "<none>";
 }
 
 /// @relates optional
-template <class T, typename U>
-bool operator==(const optional<T>& lhs, const U& rhs) {
-  return (lhs) ? *lhs == rhs : false;
+template <class Processor, class T>
+typename std::enable_if<Processor::is_saving::value>::type
+serialize(Processor& sink, optional<T>& x, const unsigned int) {
+  uint8_t flag = x ? 1 : 0;
+  sink & flag;
+  if (flag)
+    sink & *x;
 }
 
 /// @relates optional
-template <class T, typename U>
-bool operator==(const T& lhs, const optional<U>& rhs) {
-  return rhs == lhs;
+template <class Processor, class T>
+typename std::enable_if<Processor::is_loading::value>::type
+serialize(Processor& source, optional<T>& x, const unsigned int) {
+  uint8_t flag;
+  source & flag;
+  if (flag) {
+    T value;
+    source & value;
+    x = std::move(value);
+  }
+  x = none;
 }
 
-/// @relates optional
-template <class T, typename U>
-bool operator!=(const optional<T>& lhs, const optional<U>& rhs) {
-  return !(lhs == rhs);
-}
+// -- [X.Y.8] comparison with optional ----------------------------------------
 
 /// @relates optional
-template <class T, typename U>
-bool operator!=(const optional<T>& lhs, const U& rhs) {
-  return !(lhs == rhs);
-}
-
-/// @relates optional
-template <class T, typename U>
-bool operator!=(const T& lhs, const optional<U>& rhs) {
-  return !(lhs == rhs);
+template <class T>
+bool operator==(const optional<T>& lhs, const optional<T>& rhs) {
+  return static_cast<bool>(lhs) == static_cast<bool>(rhs)
+      && (! lhs || *lhs == *rhs);
 }
 
 /// @relates optional
 template <class T>
-bool operator==(const optional<T>& val, const none_t&) {
-  return ! val.valid();
+bool operator!=(const optional<T>& lhs, const optional<T>& rhs) {
+  return ! (lhs == rhs);
 }
 
 /// @relates optional
 template <class T>
-bool operator==(const none_t&, const optional<T>& val) {
-  return ! val.valid();
-}
-/// @relates optional
-template <class T>
-bool operator!=(const optional<T>& lhs, const none_t& rhs) {
-  return !(lhs == rhs);
+bool operator<(const optional<T>& lhs, const optional<T>& rhs) {
+  return static_cast<bool>(rhs) && (! lhs || *lhs < *rhs);
 }
 
 /// @relates optional
 template <class T>
-bool operator!=(const none_t& lhs, const optional<T>& rhs) {
-  return !(lhs == rhs);
+bool operator<=(const optional<T>& lhs, const optional<T>& rhs) {
+  return ! (rhs < lhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator>=(const optional<T>& lhs, const optional<T>& rhs) {
+  return ! (lhs < rhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator>(const optional<T>& lhs, const optional<T>& rhs) {
+  return rhs < lhs;
+}
+
+// -- [X.Y.9] comparison with none_t (aka. nullopt_t) -------------------------
+
+/// @relates optional
+template <class T>
+bool operator==(const optional<T>& lhs, none_t) {
+  return ! lhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator==(none_t, const optional<T>& rhs) {
+  return ! rhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator!=(const optional<T>& lhs, none_t) {
+  return static_cast<bool>(lhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator!=(none_t, const optional<T>& rhs) {
+  return static_cast<bool>(rhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator<(const optional<T>&, none_t) {
+  return false;
+}
+
+/// @relates optional
+template <class T>
+bool operator<(none_t, const optional<T>& rhs) {
+  return static_cast<bool>(rhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator<=(const optional<T>& lhs, none_t) {
+  return ! lhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator<=(none_t, const optional<T>&) {
+  return true;
+}
+
+/// @relates optional
+template <class T>
+bool operator>(const optional<T>& lhs, none_t) {
+  return static_cast<bool>(lhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator>(none_t, const optional<T>&) {
+  return false;
+}
+
+/// @relates optional
+template <class T>
+bool operator>=(const optional<T>&, none_t) {
+  return true;
+}
+
+/// @relates optional
+template <class T>
+bool operator>=(none_t, const optional<T>&) {
+  return true;
+}
+
+// -- [X.Y.10] comparison with value type ------------------------------------
+
+/// @relates optional
+template <class T>
+bool operator==(const optional<T>& lhs, const T& rhs) {
+  return lhs && *lhs == rhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator==(const T& lhs, const optional<T>& rhs) {
+  return rhs && lhs == *rhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator!=(const optional<T>& lhs, const T& rhs) {
+  return ! lhs || ! (*lhs == rhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator!=(const T& lhs, const optional<T>& rhs) {
+  return ! rhs || ! (lhs == *rhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator<(const optional<T>& lhs, const T& rhs) {
+  return ! lhs || *lhs < rhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator<(const T& lhs, const optional<T>& rhs) {
+  return rhs && lhs < *rhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator<=(const optional<T>& lhs, const T& rhs) {
+  return ! lhs || ! (rhs < *lhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator<=(const T& lhs, const optional<T>& rhs) {
+  return rhs && ! (rhs < lhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator>(const optional<T>& lhs, const T& rhs) {
+  return lhs && rhs < *lhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator>(const T& lhs, const optional<T>& rhs) {
+  return ! rhs || *rhs < lhs;
+}
+
+/// @relates optional
+template <class T>
+bool operator>=(const optional<T>& lhs, const T& rhs) {
+  return lhs && ! (*lhs < rhs);
+}
+
+/// @relates optional
+template <class T>
+bool operator>=(const T& lhs, const optional<T>& rhs) {
+  return ! rhs || ! (lhs < *rhs);
 }
 
 } // namespace caf

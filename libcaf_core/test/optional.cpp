@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -22,64 +22,72 @@
 #define CAF_SUITE optional
 #include "caf/test/unit_test.hpp"
 
-#include <string>
-
 #include "caf/optional.hpp"
 
 using namespace std;
 using namespace caf;
 
-CAF_TEST(empties) {
-  optional<int> i;
-  optional<int> j;
-  CAF_CHECK(i == j);
-  CAF_CHECK(!(i != j));
-}
-
-CAF_TEST(unequal) {
-  optional<int> i = 5;
-  optional<int> j = 6;
-  CAF_CHECK(!(i == j));
-  CAF_CHECK(i != j);
-}
-
-CAF_TEST(distinct_types) {
-  optional<int> i;
-  optional<double> j;
-  CAF_CHECK(i == j);
-  CAF_CHECK(!(i != j));
-}
+namespace {
 
 struct qwertz {
-  qwertz(int i, int j) : i_(i), j_(j) {
+  qwertz(int x, int y) : x_(x), y_(y) {
     // nop
   }
-  int i_;
-  int j_;
+  int x_;
+  int y_;
 };
 
-inline bool operator==(const qwertz& lhs, const qwertz& rhs) {
-  return lhs.i_ == rhs.i_ && lhs.j_ == rhs.j_;
+bool operator==(const qwertz& lhs, const qwertz& rhs) {
+  return lhs.x_ == rhs.x_ && lhs.y_ == rhs.y_;
+}
+
+} // namespace <anonymous>
+
+CAF_TEST(empty) {
+  optional<int> x;
+  optional<int> y;
+  CAF_CHECK(x == y);
+  CAF_CHECK(!(x != y));
+}
+
+CAF_TEST(equality) {
+  optional<int> x = 42;
+  optional<int> y = 7;
+  CAF_CHECK(x != y);
+  CAF_CHECK(!(x == y));
+}
+
+CAF_TEST(ordering) {
+  optional<int> x = 42;
+  optional<int> y = 7;
+  CAF_CHECK(x > y);
+  CAF_CHECK(x >= y);
+  CAF_CHECK(y < x);
+  CAF_CHECK(y <= x);
+  CAF_CHECK(!(y > x));
+  CAF_CHECK(!(y >= x));
+  CAF_CHECK(!(x < y));
+  CAF_CHECK(!(x <= y));
+  CAF_CHECK(x < 4711);
+  CAF_CHECK(4711 > x);
+  CAF_CHECK(4711 >= x);
+  CAF_CHECK(!(x > 4711));
+  CAF_CHECK(!(x >= 4711));
+  CAF_CHECK(!(4211 < x));
+  CAF_CHECK(!(4211 <= x));
 }
 
 CAF_TEST(custom_type_none) {
-  optional<qwertz> i;
-  CAF_CHECK(i == none);
+  optional<qwertz> x;
+  CAF_CHECK(x == none);
 }
 
 CAF_TEST(custom_type_engaged) {
   qwertz obj{1, 2};
-  optional<qwertz> j = obj;
-  CAF_CHECK(j != none);
-  CAF_CHECK(obj == j);
-  CAF_CHECK(j == obj );
-  CAF_CHECK(obj == *j);
-  CAF_CHECK(*j == obj);
-}
-
-CAF_TEST(test_optional) {
-  optional<qwertz> i = qwertz(1,2);
-  CAF_CHECK(! i.empty());
-  optional<qwertz> j = { { 1, 2 } };
-  CAF_CHECK(! j.empty());
+  optional<qwertz> x = obj;
+  CAF_CHECK(x != none);
+  CAF_CHECK(obj == x);
+  CAF_CHECK(x == obj );
+  CAF_CHECK(obj == *x);
+  CAF_CHECK(*x == obj);
 }

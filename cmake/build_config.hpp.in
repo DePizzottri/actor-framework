@@ -38,4 +38,8 @@
 #define CAF_USE_ASIO
 #endif
 
+#if @CAF_NO_EXCEPTIONS_INT@ != -1
+#define CAF_NO_EXCEPTIONS
+#endif
+
 #endif //CAF_DETAIL_BUILD_CONFIG_HPP

@@ -25,8 +25,10 @@
 #include <functional>
 
 #include "caf/extend.hpp"
+#include "caf/expected.hpp"
+#include "caf/resumable.hpp"
 #include "caf/make_counted.hpp"
-#include "caf/memory_managed.hpp"
+#include "caf/execution_unit.hpp"
 
 #include "caf/io/fwd.hpp"
 #include "caf/io/accept_handle.hpp"
@@ -34,8 +36,6 @@
 
 #include "caf/io/network/protocol.hpp"
 #include "caf/io/network/native_socket.hpp"
-
-#include "caf/detail/memory_cache_flag_type.hpp"
 
 namespace boost {
 namespace asio {
@@ -48,43 +48,43 @@ namespace io {
 namespace network {
 
 /// Low-level backend for IO multiplexing.
-class multiplexer {
+class multiplexer : public execution_unit {
 public:
-  virtual ~multiplexer();
+  explicit multiplexer(actor_system* sys);
 
   /// Tries to connect to `host` on given `port` and returns an unbound
   /// connection handle on success.
   /// @threadsafe
-  virtual connection_handle new_tcp_scribe(const std::string& host,
-                                           uint16_t port) = 0;
+  virtual expected<connection_handle>
+  new_tcp_scribe(const std::string& host, uint16_t port) = 0;
 
   /// Assigns an unbound scribe identified by `hdl` to `ptr`.
   /// @warning Do not call from outside the multiplexer's event loop.
-  virtual void assign_tcp_scribe(abstract_broker* ptr,
-                                 connection_handle hdl) = 0;
+  virtual expected<void>
+  assign_tcp_scribe(abstract_broker* ptr, connection_handle hdl) = 0;
 
   /// Creates a new TCP doorman from a native socket handle.
   /// @warning Do not call from outside the multiplexer's event loop.
   virtual connection_handle add_tcp_scribe(abstract_broker* ptr,
                                            native_socket fd) = 0;
 
-  /// Tries to connect to host `h` on given `port` and returns a
+  /// Tries to connect to `host` on `port` and returns a
   /// new scribe managing the connection on success.
   /// @warning Do not call from outside the multiplexer's event loop.
-  virtual connection_handle add_tcp_scribe(abstract_broker* ptr,
-                                           const std::string& host,
-                                           uint16_t port) = 0;
+  virtual expected<connection_handle>
+  add_tcp_scribe(abstract_broker*, const std::string& host, uint16_t port) = 0;
 
-  /// Tries to create an unbound TCP doorman running `port`, optionally
+  /// Tries to create an unbound TCP doorman bound to `port`, optionally
   /// accepting only connections from IP address `in`.
   /// @warning Do not call from outside the multiplexer's event loop.
-  virtual std::pair<accept_handle, uint16_t>
+  virtual expected<std::pair<accept_handle, uint16_t>>
   new_tcp_doorman(uint16_t port, const char* in = nullptr,
                   bool reuse_addr = false) = 0;
 
   /// Assigns an unbound doorman identified by `hdl` to `ptr`.
   /// @warning Do not call from outside the multiplexer's event loop.
-  virtual void assign_tcp_doorman(abstract_broker* ptr, accept_handle hdl) = 0;
+  virtual expected<void>
+  assign_tcp_doorman(abstract_broker* ptr, accept_handle hdl) = 0;
 
   /// Creates a new TCP doorman from a native socket handle.
   /// @warning Do not call from outside the multiplexer's event loop.
@@ -94,18 +94,17 @@ public:
   /// Tries to create a new TCP doorman running on port `p`, optionally
   /// accepting only connections from IP address `in`.
   /// @warning Do not call from outside the multiplexer's event loop.
-  virtual std::pair<accept_handle, uint16_t>
+  virtual expected<std::pair<accept_handle, uint16_t>>
   add_tcp_doorman(abstract_broker* ptr, uint16_t port, const char* in = nullptr,
                   bool reuse_addr = false) = 0;
 
   /// Simple wrapper for runnables
-  struct runnable : ref_counted {
-    static constexpr auto memory_cache_flag = detail::needs_embedding;
-    virtual void run() = 0;
-    virtual ~runnable();
+  class runnable : public resumable, public ref_counted {
+  public:
+    subtype_t subtype() const override;
+    void intrusive_ptr_add_ref_impl() override;
+    void intrusive_ptr_release_impl() override;
   };
-
-  using runnable_ptr = intrusive_ptr<runnable>;
 
   /// Makes sure the multipler does not exit its event loop until
   /// the destructor of `supervisor` has been called.
@@ -120,7 +119,7 @@ public:
   virtual supervisor_ptr make_supervisor() = 0;
 
   /// Creates an instance using the networking backend compiled with CAF.
-  static std::unique_ptr<multiplexer> make();
+  static std::unique_ptr<multiplexer> make(actor_system& sys);
 
   /// Runs the multiplexers event loop.
   virtual void run() = 0;
@@ -145,11 +144,12 @@ public:
     struct impl : runnable {
       F f;
       impl(F&& mf) : f(std::move(mf)) { }
-      void run() override {
+      resume_result resume(execution_unit*, size_t) override {
         f();
+        return done;
       }
     };
-    dispatch_runnable(make_counted<impl>(std::move(fun)));
+    exec_later(new impl(std::move(fun)));
   }
 
   /// Retrieves a pointer to the implementation or `nullptr` if CAF was
@@ -165,10 +165,8 @@ public:
   }
 
 protected:
-  /// Implementation-specific dispatching to the multiplexer's thread.
-  virtual void dispatch_runnable(runnable_ptr ptr) = 0;
-
-  /// Must be set by the subclass.
+  /// Identifies the thread this multiplexer
+  /// is running in. Must be set by the subclass.
   std::thread::id tid_;
 };
 
