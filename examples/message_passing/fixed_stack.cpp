@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdint>
 #include <iostream>
 #include "caf/all.hpp"
@@ -58,8 +59,7 @@ public:
   }
 
   behavior make_behavior() override {
-    if (size_ < 2)
-      throw std::runtime_error("size < 2 is not supported for fixed_stack");
+    assert(size_ < 2);
     return empty_;
   }
 
@@ -80,7 +80,7 @@ void caf_main(actor_system& system) {
   // drain stack
   aout(self) << "stack: { ";
   bool stack_empty = false;
-  while (! stack_empty) {
+  while (!stack_empty) {
     self->request(st, std::chrono::seconds(10), pop_atom::value).receive(
       [&](int x) {
         aout(self) << x << "  ";

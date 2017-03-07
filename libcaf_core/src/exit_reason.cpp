@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,6 +19,10 @@
 
 #include "caf/exit_reason.hpp"
 
+#include "caf/message.hpp"
+
+#include "caf/detail/enum_to_string.hpp"
+
 namespace caf {
 
 namespace {
@@ -26,7 +30,6 @@ namespace {
 const char* exit_reason_strings[] = {
   "normal",
   "unhandled_exception",
-  "unhandled_request_error",
   "unknown",
   "out_of_workers",
   "user_shutdown",
@@ -38,11 +41,8 @@ const char* exit_reason_strings[] = {
 } // namespace <anonymous>
 
 
-const char* to_string(exit_reason x) {
-  auto index = static_cast<size_t>(x);
-  if (index > static_cast<size_t>(exit_reason::unreachable))
-    return "<unknown>";
-  return exit_reason_strings[index];
+std::string to_string(exit_reason x) {
+  return detail::enum_to_string(x, exit_reason_strings);
 }
 
 error make_error(exit_reason x) {

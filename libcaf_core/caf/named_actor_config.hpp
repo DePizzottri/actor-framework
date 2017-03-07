@@ -17,56 +17,35 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_BOXED_HPP
-#define CAF_DETAIL_BOXED_HPP
+#ifndef CAF_NAMED_ACTOR_CONFIG_HPP
+#define CAF_NAMED_ACTOR_CONFIG_HPP
 
-#include "caf/detail/wrapped.hpp"
+#include <cstddef>
+
+#include "caf/atom.hpp"
+#include "caf/deep_to_string.hpp"
 
 namespace caf {
-namespace detail {
 
-template <class T>
-struct boxed {
-  constexpr boxed() {
-    // nop
-  }
-  using type = detail::wrapped<T>;
+/// Stores a flow-control configuration.
+struct named_actor_config {
+  atom_value strategy;
+  size_t low_watermark;
+  size_t max_pending;
 };
 
-template <class T>
-struct boxed<detail::wrapped<T>> {
-  constexpr boxed() {
-    // nop
-  }
-  using type = detail::wrapped<T>;
-};
+template <class Processor>
+void serialize(Processor& proc, named_actor_config& x, unsigned int) {
+  proc & x.strategy;
+  proc & x.low_watermark;
+  proc & x.max_pending;
+}
 
-template <class T>
-struct is_boxed {
-  static constexpr bool value = false;
-};
+inline std::string to_string(const named_actor_config& x) {
+  return "named_actor_config"
+         + deep_to_string_as_tuple(x.strategy, x.low_watermark, x.max_pending);
+}
 
-template <class T>
-struct is_boxed<detail::wrapped<T>> {
-  static constexpr bool value = true;
-};
-
-template <class T>
-struct is_boxed<detail::wrapped<T>()> {
-  static constexpr bool value = true;
-};
-
-template <class T>
-struct is_boxed<detail::wrapped<T>(&)()> {
-  static constexpr bool value = true;
-};
-
-template <class T>
-struct is_boxed<detail::wrapped<T>(*)()> {
-  static constexpr bool value = true;
-};
-
-} // namespace detail
 } // namespace caf
 
-#endif // CAF_DETAIL_BOXED_HPP
+#endif //CAF_NAMED_ACTOR_CONFIG_HPP

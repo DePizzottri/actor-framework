@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -36,7 +36,7 @@ class group_module {
 public:
   // -- constructors, destructors, and assignment operators --------------------
 
-  group_module(actor_system& sys, std::string module_name);
+  group_module(actor_system& sys, std::string mname);
 
   virtual ~group_module();
 
@@ -47,7 +47,7 @@ public:
 
   /// Returns a pointer to the group associated with the name `group_name`.
   /// @threadsafe
-  virtual group get(const std::string& group_name) = 0;
+  virtual expected<group> get(const std::string& group_name) = 0;
 
   /// Loads a group of this module from `source` and stores it in `storage`.
   virtual error load(deserializer& source, group& storage) = 0;

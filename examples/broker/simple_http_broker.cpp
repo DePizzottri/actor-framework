@@ -78,12 +78,12 @@ public:
 
 void caf_main(actor_system& system, const config& cfg) {
   auto server_actor = system.middleman().spawn_server(server, cfg.port);
-  if (! server_actor) {
+  if (!server_actor) {
     cerr << "*** cannot spawn server: "
          << system.render(server_actor.error()) << endl;
     return;
   }
-  cout << "*** run in server mode listen on: " << cfg.port << endl;
+  cout << "*** listening on port " << cfg.port << endl;
   cout << "*** to quit the program, simply press <enter>" << endl;
   // wait for any input
   std::string dummy;

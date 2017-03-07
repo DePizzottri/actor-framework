@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -35,8 +35,9 @@ public:
   /// Constructs an invalid response promise.
   typed_response_promise() = default;
 
-  inline typed_response_promise(local_actor* self, mailbox_element& src)
-      : promise_(self, src) {
+  inline typed_response_promise(execution_unit* ctx, strong_actor_ptr self,
+                                mailbox_element& src)
+      : promise_(ctx, std::move(self), src) {
     // nop
   }
 
@@ -53,7 +54,7 @@ public:
   /// Satisfies the promise by sending a non-error response message.
   template <class U, class... Us>
   typename std::enable_if<
-    (sizeof...(Us) > 0) || ! std::is_convertible<U, error>::value,
+    (sizeof...(Us) > 0) || !std::is_convertible<U, error>::value,
     typed_response_promise
   >::type
   deliver(U&& x, Us&&... xs) {
@@ -63,6 +64,13 @@ public:
                                      typename std::decay<Us>::type...>>::value,
       "typed_response_promise: message type mismatched");
     promise_.deliver(std::forward<U>(x), std::forward<Us>(xs)...);
+    return *this;
+  }
+
+  template <message_priority P = message_priority::normal,
+           class Handle = actor, class... Us>
+  typed_response_promise delegate(const Handle& dest, Us&&... xs) {
+    promise_.template delegate<P>(dest, std::forward<Us>(xs)...);
     return *this;
   }
 

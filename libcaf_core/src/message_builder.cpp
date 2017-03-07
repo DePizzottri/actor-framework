@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -87,7 +87,7 @@ detail::dynamic_message_data* message_builder::data() {
   // detach if needed, i.e., assume further non-const
   // operations on data_ can cause race conditions if
   // someone else holds a reference to data_
-  if (! data_->unique()) {
+  if (!data_->unique()) {
     auto tmp = static_cast<detail::dynamic_message_data*>(data_.get())->copy();
     data_.reset(tmp.release(), false);
   }

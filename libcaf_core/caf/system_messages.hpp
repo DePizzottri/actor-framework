@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -29,6 +29,8 @@
 #include "caf/actor_addr.hpp"
 #include "caf/deep_to_string.hpp"
 
+#include "caf/meta/type_name.hpp"
+
 #include "caf/detail/tbind.hpp"
 #include "caf/detail/type_list.hpp"
 
@@ -37,85 +39,33 @@ namespace caf {
 /// Sent to all links when an actor is terminated.
 /// @note Actors can override the default handler by calling
 ///       `self->set_exit_handler(...)`.
-class exit_msg {
-public:
-  // -- friend types that need access to private ctors -------------------------
-
-  template <class>
-  friend class data_processor;
-
-  template <class>
-  friend class detail::type_erased_value_impl;
-
-  // -- constructors -----------------------------------------------------------
-
-  inline exit_msg(actor_addr x, error y)
-      : source(std::move(x)),
-        reason(std::move(y)) {
-    // nop
-  }
-
-  // -- data members -----------------------------------------------------------
-
+struct exit_msg {
   /// The source of this message, i.e., the terminated actor.
   actor_addr source;
 
   /// The exit reason of the terminated actor.
   error reason;
-
-private:
-  exit_msg() = default;
 };
 
-inline std::string to_string(const exit_msg& x) {
-  return "exit_msg" + deep_to_string(std::tie(x.source, x.reason));
-}
-
-template <class Processor>
-void serialize(Processor& proc, exit_msg& x, const unsigned int) {
-  proc & x.source;
-  proc & x.reason;
+/// @relates exit_msg
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, exit_msg& x) {
+  return f(meta::type_name("exit_msg"), x.source, x.reason);
 }
 
 /// Sent to all actors monitoring an actor when it is terminated.
-class down_msg {
-public:
-  // -- friend types that need access to private ctors -------------------------
-
-  template <class>
-  friend class data_processor;
-
-  template <class>
-  friend class detail::type_erased_value_impl;
-
-  // -- constructors -----------------------------------------------------------
-
-  inline down_msg(actor_addr x, error y)
-      : source(std::move(x)),
-        reason(std::move(y)) {
-    // nop
-  }
-
-  // -- data members -----------------------------------------------------------
-
+struct down_msg {
   /// The source of this message, i.e., the terminated actor.
   actor_addr source;
 
   /// The exit reason of the terminated actor.
   error reason;
-
-private:
-  down_msg() = default;
 };
 
-inline std::string to_string(const down_msg& x) {
-  return "down_msg" + deep_to_string(std::tie(x.source, x.reason));
-}
-
-template <class Processor>
-void serialize(Processor& proc, down_msg& x, const unsigned int) {
-  proc & x.source;
-  proc & x.reason;
+/// @relates down_msg
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, down_msg& x) {
+  return f(meta::type_name("down_msg"), x.source, x.reason);
 }
 
 /// Sent to all members of a group when it goes offline.
@@ -124,29 +74,10 @@ struct group_down_msg {
   group source;
 };
 
-inline std::string to_string(const group_down_msg& x) {
-  return "group_down" + deep_to_string(std::tie(x.source));
-}
-
 /// @relates group_down_msg
-template <class Processor>
-void serialize(Processor& proc, group_down_msg& x, const unsigned int) {
-  proc & x.source;
-}
-
-/// Sent whenever a timeout occurs during a synchronous send.
-/// This system message does not have any fields, because the message ID
-/// sent alongside this message identifies the matching request that timed out.
-class sync_timeout_msg { };
-
-inline std::string to_string(const sync_timeout_msg&) {
-  return "sync_timeout";
-}
-
-/// @relates group_down_msg
-template <class Processor>
-void serialize(Processor&, sync_timeout_msg&, const unsigned int) {
-  // nop
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, group_down_msg& x) {
+  return f(meta::type_name("group_down_msg"), x.source);
 }
 
 /// Signalizes a timeout event.
@@ -156,14 +87,10 @@ struct timeout_msg {
   uint32_t timeout_id;
 };
 
-inline std::string to_string(const timeout_msg& x) {
-  return "timeout" + deep_to_string(std::tie(x.timeout_id));
-}
-
 /// @relates timeout_msg
-template <class Processor>
-void serialize(Processor& proc, timeout_msg& x, const unsigned int) {
-  proc & x.timeout_id;
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, timeout_msg& x) {
+  return f(meta::type_name("timeout_msg"), x.timeout_id);
 }
 
 } // namespace caf

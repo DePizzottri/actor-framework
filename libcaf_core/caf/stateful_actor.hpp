@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "caf/fwd.hpp"
+#include "caf/sec.hpp"
 
 #include "caf/logger.hpp"
 
@@ -44,17 +45,17 @@ public:
       : Base(cfg, std::forward<Ts>(xs)...),
         state(state_) {
     if (detail::is_serializable<State>::value)
-      this->is_serializable(true);
+      this->setf(Base::is_serializable_flag);
   }
 
-  ~stateful_actor() {
+  ~stateful_actor() override {
     // nop
   }
 
   /// Destroys the state of this actor (no further overriding allowed).
   void on_exit() final {
     CAF_LOG_TRACE("");
-    if (this->is_initialized())
+    if (this->getf(Base::is_initialized_flag))
       state_.~State();
   }
 
@@ -62,16 +63,12 @@ public:
     return get_name(state_);
   }
 
-  error save_state(serializer& sink, const unsigned int version) override {
-    serialize_state(sink, state, version);
-    // TODO: refactor after visit API is in place (#470)
-    return {};
+  error save_state(serializer& sink, unsigned int version) override {
+    return serialize_state(&sink, state, version);
   }
 
-  error load_state(deserializer& source, const unsigned int version) override {
-    serialize_state(source, state, version);
-    // TODO: refactor after visit API is in place (#470)
-    return {};
+  error load_state(deserializer& source, unsigned int version) override {
+    return serialize_state(&source, state, version);
   }
 
   /// A reference to the actor's state.
@@ -87,16 +84,15 @@ public:
   /// @endcond
 
 private:
-  template <class Archive, class U>
-  typename std::enable_if<detail::is_serializable<U>::value>::type
-  serialize_state(Archive& ar, U& st, const unsigned int) {
-    ar & st;
+  template <class Inspector, class T>
+  auto serialize_state(Inspector* f, T& x, unsigned int)
+  -> decltype(inspect(*f, x)) {
+    return inspect(*f, x);
   }
 
-  template <class Archive, class U>
-  typename std::enable_if<! detail::is_serializable<U>::value>::type
-  serialize_state(Archive&, U&, const unsigned int) {
-    CAF_RAISE_ERROR("serialize_state with unserializable type called");
+  template <class T>
+  error serialize_state(void*, T&, unsigned int) {
+    return sec::invalid_argument;
   }
 
   template <class T>
@@ -106,7 +102,7 @@ private:
   }
 
   template <class T>
-  typename std::enable_if<! std::is_constructible<State, T>::value>::type
+  typename std::enable_if<!std::is_constructible<State, T>::value>::type
   cr_state(T) {
     new (&state_) State();
   }
@@ -127,7 +123,7 @@ private:
   }
 
   template <class U>
-  typename std::enable_if<! detail::has_name<U>::value, const char*>::type
+  typename std::enable_if<!detail::has_name<U>::value, const char*>::type
   get_name(const U&) const {
     return Base::name();
   }

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -62,7 +62,7 @@ public:
     /// Any value, used to identify attachable instances.
     const void* ptr;
 
-    token(size_t subtype, const void* ptr);
+    token(size_t typenr, const void* vptr);
   };
 
   virtual ~attachable();

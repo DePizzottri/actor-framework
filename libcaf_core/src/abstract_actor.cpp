@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -40,6 +40,7 @@
 #include "caf/actor_control_block.hpp"
 
 #include "caf/detail/disposer.hpp"
+#include "caf/detail/enum_to_string.hpp"
 #include "caf/detail/shared_spinlock.hpp"
 
 namespace caf {
@@ -90,27 +91,33 @@ actor_system& abstract_actor::home_system() const noexcept {
   return *(actor_control_block::from(this)->home_system);
 }
 
-void abstract_actor::is_registered(bool value) {
-  if (is_registered() == value)
+void abstract_actor::register_at_system() {
+  if (getf(is_registered_flag))
     return;
-  if (value)
-    home_system().registry().inc_running();
-  else
-    home_system().registry().dec_running();
-  set_flag(value, is_registered_flag);
+  setf(is_registered_flag);
+  home_system().registry().inc_running();
 }
 
+void abstract_actor::unregister_from_system() {
+  if (!getf(is_registered_flag))
+    return;
+  unsetf(is_registered_flag);
+  home_system().registry().dec_running();
+}
+
+namespace {
+
+const char* linking_operation_strings[] = {
+  "establish_link",
+  "establish_backlink",
+  "remove_link",
+  "remove_backlink"
+};
+
+} // namespace <anonymous>
+
 std::string to_string(abstract_actor::linking_operation op) {
-  switch (op) {
-    case abstract_actor::establish_link_op:
-      return "establish_link";
-    case abstract_actor::establish_backlink_op:
-      return "establish_backlink";
-    case abstract_actor::remove_link_op:
-      return "remove_link";
-    default:
-      return "remove_backlink";
-  }
+  return detail::enum_to_string(op, linking_operation_strings);
 }
 
 } // namespace caf

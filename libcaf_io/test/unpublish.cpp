@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -41,7 +41,7 @@ public:
     // nop
   }
 
-  ~dummy() {
+  ~dummy() override {
     ++s_dtor_called;
   }
 
@@ -55,7 +55,7 @@ public:
 };
 
 struct fixture {
-  fixture() : testee(unsafe_actor_handle_init) {
+  fixture() {
     new (&system) actor_system(cfg.load<io::middleman>()
                                   .parse(test::engine::argc(),
                                          test::engine::argv()));
@@ -71,11 +71,11 @@ struct fixture {
 
   actor remote_actor(const char* hostname, uint16_t port,
                      bool expect_fail = false) {
-    actor result{unsafe_actor_handle_init};
+    actor result;
     scoped_actor self{system, true};
     self->request(system.middleman().actor_handle(), infinite,
                   connect_atom::value, hostname, port).receive(
-      [&](ok_atom, node_id&, strong_actor_ptr& res, std::set<std::string>& xs) {
+      [&](node_id&, strong_actor_ptr& res, std::set<std::string>& xs) {
         CAF_REQUIRE(xs.empty());
         if (res)
           result = actor_cast<actor>(std::move(res));
@@ -85,9 +85,9 @@ struct fixture {
       }
     );
     if (expect_fail)
-      CAF_REQUIRE(result.unsafe());
+      CAF_REQUIRE(!result);
     else
-      CAF_REQUIRE(! result.unsafe());
+      CAF_REQUIRE(result);
     return result;
   }
 
@@ -121,7 +121,7 @@ CAF_TEST(unpublishing) {
             down_msg{testee.address(), exit_reason::normal});
   // must fail now
   auto x2 = remote_actor("127.0.0.1", port, true);
-  CAF_CHECK(x2.unsafe());
+  CAF_CHECK(!x2);
 }
 
 CAF_TEST_FIXTURE_SCOPE_END()

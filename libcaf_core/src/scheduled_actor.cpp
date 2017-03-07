@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -20,6 +20,7 @@
 #include "caf/scheduled_actor.hpp"
 
 #include "caf/config.hpp"
+#include "caf/to_string.hpp"
 #include "caf/actor_ostream.hpp"
 
 #include "caf/detail/private_thread.hpp"
@@ -57,7 +58,7 @@ result<message> drop(scheduled_actor*, message_view&) {
 
 void scheduled_actor::default_error_handler(scheduled_actor* ptr, error& x) {
   ptr->fail_state_ = std::move(x);
-  ptr->is_terminated(true);
+  ptr->setf(is_terminated_flag);
 }
 
 void scheduled_actor::default_down_handler(scheduled_actor* ptr, down_msg& x) {
@@ -71,6 +72,26 @@ void scheduled_actor::default_exit_handler(scheduled_actor* ptr, exit_msg& x) {
     default_error_handler(ptr, x.reason);
 }
 
+# ifndef CAF_NO_EXCEPTIONS
+error scheduled_actor::default_exception_handler(pointer ptr,
+                                                 std::exception_ptr& x) {
+  CAF_ASSERT(x != nullptr);
+  try {
+    std::rethrow_exception(x);
+  } catch (const std::exception& e) {
+    aout(ptr) << "*** unhandled exception: [id: " << ptr->id()
+              << ", name: " << ptr->name() << ", exception typeid: "
+              << typeid(e).name() << "]: " << e.what()
+              << std::endl;
+  } catch (...) {
+    aout(ptr) << "*** unhandled exception: [id: " << ptr->id()
+              << ", name: " << ptr->name() << "]: unknown exception"
+              << std::endl;
+  }
+  return sec::runtime_error;
+}
+# endif // CAF_NO_EXCEPTIONS
+
 // -- constructors and destructors ---------------------------------------------
 
 scheduled_actor::scheduled_actor(actor_config& cfg)
@@ -80,36 +101,40 @@ scheduled_actor::scheduled_actor(actor_config& cfg)
       error_handler_(default_error_handler),
       down_handler_(default_down_handler),
       exit_handler_(default_exit_handler),
-      private_thread_(nullptr) {
+      private_thread_(nullptr)
+# ifndef CAF_NO_EXCEPTIONS
+      , exception_handler_(default_exception_handler)
+# endif // CAF_NO_EXCEPTIONS
+      {
   // nop
 }
 
 scheduled_actor::~scheduled_actor() {
   // signalize to the private thread object that it is
   // unrachable and can be destroyed as well
-  if (private_thread_)
+  if (private_thread_ != nullptr)
     private_thread_->notify_self_destroyed();
 }
 
 // -- overridden functions of abstract_actor -----------------------------------
 
-void scheduled_actor::enqueue(mailbox_element_ptr ptr,
-                                         execution_unit* eu) {
-  CAF_PUSH_AID(id());
-  CAF_LOG_TRACE(CAF_ARG(*ptr));
+void scheduled_actor::enqueue(mailbox_element_ptr ptr, execution_unit* eu) {
   CAF_ASSERT(ptr != nullptr);
-  CAF_ASSERT(! is_blocking());
+  CAF_ASSERT(!getf(is_blocking_flag));
+  CAF_LOG_TRACE(CAF_ARG(*ptr));
+  CAF_LOG_SEND_EVENT(ptr);
   auto mid = ptr->mid;
   auto sender = ptr->sender;
   switch (mailbox().enqueue(ptr.release())) {
     case detail::enqueue_result::unblocked_reader: {
+      CAF_LOG_ACCEPT_EVENT();
       // add a reference count to this actor and re-schedule it
       intrusive_ptr_add_ref(ctrl());
-      if (is_detached()) {
+      if (getf(is_detached_flag)) {
         CAF_ASSERT(private_thread_ != nullptr);
         private_thread_->resume();
       } else {
-        if (eu)
+        if (eu != nullptr)
           eu->exec_later(this);
         else
           home_system().scheduler().enqueue(this);
@@ -117,6 +142,7 @@ void scheduled_actor::enqueue(mailbox_element_ptr ptr,
       break;
     }
     case detail::enqueue_result::queue_closed: {
+      CAF_LOG_REJECT_EVENT();
       if (mid.is_request()) {
         detail::sync_request_bouncer f{exit_reason()};
         f(sender, mid);
@@ -125,6 +151,7 @@ void scheduled_actor::enqueue(mailbox_element_ptr ptr,
     }
     case detail::enqueue_result::success:
       // enqueued to a running actors' mailbox; nothing to do
+      CAF_LOG_ACCEPT_EVENT();
       break;
   }
 }
@@ -137,9 +164,10 @@ const char* scheduled_actor::name() const {
 
 void scheduled_actor::launch(execution_unit* eu, bool lazy, bool hide) {
   CAF_LOG_TRACE(CAF_ARG(lazy) << CAF_ARG(hide));
-  CAF_ASSERT(! is_blocking());
-  is_registered(! hide);
-  if (is_detached()) {
+  CAF_ASSERT(!getf(is_blocking_flag));
+  if (!hide)
+    register_at_system();
+  if (getf(is_detached_flag)) {
     private_thread_ = new detail::private_thread(this);
     private_thread_->start();
     return;
@@ -156,7 +184,7 @@ void scheduled_actor::launch(execution_unit* eu, bool lazy, bool hide) {
 }
 
 bool scheduled_actor::cleanup(error&& fail_state, execution_unit* host) {
-  if (is_detached()) {
+  if (getf(is_detached_flag)) {
     CAF_ASSERT(private_thread_ != nullptr);
     private_thread_->shutdown();
   }
@@ -182,22 +210,23 @@ void scheduled_actor::intrusive_ptr_release_impl() {
 resumable::resume_result
 scheduled_actor::resume(execution_unit* ctx, size_t max_throughput) {
   CAF_PUSH_AID(id());
-  if (! activate(ctx))
+  if (!activate(ctx))
     return resume_result::done;
   size_t handled_msgs = 0;
   auto reset_timeout_if_needed = [&] {
-    if (handled_msgs > 0 && ! bhvr_stack_.empty())
+    if (handled_msgs > 0 && !bhvr_stack_.empty())
       request_timeout(bhvr_stack_.back().timeout());
   };
   mailbox_element_ptr ptr;
   while (handled_msgs < max_throughput) {
     do {
       ptr = next_message();
-      if (! ptr && mailbox().try_block()) {
+      if (!ptr) {
         reset_timeout_if_needed();
-        return resumable::awaiting_message;
+        if (mailbox().try_block())
+          return resumable::awaiting_message;
       }
-    } while (! ptr);
+    } while (!ptr);
     switch (reactivate(*ptr)) {
       case activation_result::terminated:
         return resume_result::done;
@@ -222,7 +251,7 @@ scheduled_actor::resume(execution_unit* ctx, size_t max_throughput) {
     }
   }
   reset_timeout_if_needed();
-  if (! has_next_message() && mailbox().try_block())
+  if (!has_next_message() && mailbox().try_block())
     return resumable::awaiting_message;
   // time's up
   return resumable::resume_later;
@@ -239,17 +268,17 @@ proxy_registry* scheduled_actor::proxy_registry_ptr() {
 void scheduled_actor::quit(error x) {
   CAF_LOG_TRACE(CAF_ARG(x));
   fail_state_ = std::move(x);
-  is_terminated(true);
+  setf(is_terminated_flag);
 }
 
 // -- timeout management -------------------------------------------------------
 
 uint32_t scheduled_actor::request_timeout(const duration& d) {
-  if (! d.valid()) {
-    has_timeout(false);
+  if (!d.valid()) {
+    unsetf(has_timeout_flag);
     return 0;
   }
-  has_timeout(true);
+  setf(has_timeout_flag);
   auto result = ++timeout_id_;
   auto msg = make_message(timeout_msg{++timeout_id_});
   CAF_LOG_TRACE("send new timeout_msg, " << CAF_ARG(timeout_id_));
@@ -263,13 +292,12 @@ uint32_t scheduled_actor::request_timeout(const duration& d) {
 }
 
 void scheduled_actor::reset_timeout(uint32_t timeout_id) {
-  if (is_active_timeout(timeout_id)) {
-    has_timeout(false);
-  }
+  if (is_active_timeout(timeout_id))
+    unsetf(has_timeout_flag);
 }
 
 bool scheduled_actor::is_active_timeout(uint32_t tid) const {
-  return has_timeout() && timeout_id_ == tid;
+  return getf(has_timeout_flag) && timeout_id_ == tid;
 }
 
 // -- message processing -------------------------------------------------------
@@ -315,31 +343,31 @@ scheduled_actor::categorize(mailbox_element& x) {
     case make_type_token<timeout_msg>(): {
       auto& tm = content.get_as<timeout_msg>(0);
       auto tid = tm.timeout_id;
-      CAF_ASSERT(! x.mid.valid());
+      CAF_ASSERT(!x.mid.valid());
       return is_active_timeout(tid) ? message_category::timeout
                                     : message_category::expired_timeout;
     }
     case make_type_token<exit_msg>(): {
-      auto& em = content.get_mutable_as<exit_msg>(0);
+      auto em = content.move_if_unshared<exit_msg>(0);
       // make sure to get rid of attachables if they're no longer needed
       unlink_from(em.source);
       // exit_reason::kill is always fatal
       if (em.reason == exit_reason::kill) {
         fail_state_ = std::move(em.reason);
-        is_terminated(true);
+        setf(is_terminated_flag);
       } else {
-        exit_handler_(this, em);
+        call_handler(exit_handler_, this, em);
       }
       return message_category::internal;
     }
     case make_type_token<down_msg>(): {
-      auto& dm = content.get_mutable_as<down_msg>(0);
-      down_handler_(this, dm);
+      auto dm = content.move_if_unshared<down_msg>(0);
+      call_handler(down_handler_, this, dm);
       return message_category::internal;
     }
     case make_type_token<error>(): {
-      auto& err = content.get_mutable_as<error>(0);
-      error_handler_(this, err);
+      auto err = content.move_if_unshared<error>(0);
+      call_handler(error_handler_, this, err);
       return message_category::internal;
     }
     default:
@@ -350,13 +378,14 @@ scheduled_actor::categorize(mailbox_element& x) {
 invoke_message_result scheduled_actor::consume(mailbox_element& x) {
   CAF_LOG_TRACE(CAF_ARG(x));
   current_element_ = &x;
+  CAF_LOG_RECEIVE_EVENT(current_element_);
   // short-circuit awaited responses
-  if (! awaited_responses_.empty()) {
+  if (!awaited_responses_.empty()) {
     auto& pr = awaited_responses_.front();
     // skip all messages until we receive the currently awaited response
     if (x.mid != pr.first)
       return im_skipped;
-    if (! pr.second(x.content())) {
+    if (!pr.second(x.content())) {
       // try again with error if first attempt failed
       auto msg = make_message(make_error(sec::unexpected_response,
                                          x.move_content_to_message()));
@@ -371,7 +400,7 @@ invoke_message_result scheduled_actor::consume(mailbox_element& x) {
     // neither awaited nor multiplexed, probably an expired timeout
     if (mrh == multiplexed_responses_.end())
       return im_dropped;
-    if (! mrh->second(x.content())) {
+    if (!mrh->second(x.content())) {
       // try again with error if first attempt failed
       auto msg = make_message(make_error(sec::unexpected_response,
                                          x.move_content_to_message()));
@@ -396,18 +425,18 @@ invoke_message_result scheduled_actor::consume(mailbox_element& x) {
       return im_success;
     }
     case message_category::ordinary: {
-      detail::default_invoke_result_visitor visitor{this};
+      detail::default_invoke_result_visitor<scheduled_actor> visitor{this};
       bool skipped = false;
-      auto had_timeout = has_timeout();
+      auto had_timeout = getf(has_timeout_flag);
       if (had_timeout)
-        has_timeout(false);
+        unsetf(has_timeout_flag);
       // restore timeout at scope exit if message was skipped
       auto timeout_guard = detail::make_scope_guard([&] {
         if (skipped && had_timeout)
-          has_timeout(true);
+          setf(has_timeout_flag);
       });
       auto call_default_handler = [&] {
-        auto sres = default_handler_(this, x);
+        auto sres = call_handler(default_handler_, this, x);
         switch (sres.flag) {
           default:
             break;
@@ -421,7 +450,7 @@ invoke_message_result scheduled_actor::consume(mailbox_element& x) {
       };
       if (bhvr_stack_.empty()) {
         call_default_handler();
-        return ! skipped ? im_success : im_skipped;
+        return !skipped ? im_success : im_skipped;
       }
       auto& bhvr = bhvr_stack_.back();
       switch (bhvr(visitor, x.content())) {
@@ -433,7 +462,7 @@ invoke_message_result scheduled_actor::consume(mailbox_element& x) {
         case match_case::no_match:
           call_default_handler();
       }
-      return ! skipped ? im_success : im_skipped;
+      return !skipped ? im_success : im_skipped;
     }
   }
   // should be unreachable
@@ -473,33 +502,33 @@ bool scheduled_actor::consume_from_cache() {
 bool scheduled_actor::activate(execution_unit* ctx) {
   CAF_LOG_TRACE("");
   CAF_ASSERT(ctx != nullptr);
-  CAF_ASSERT(! is_blocking());
+  CAF_ASSERT(!getf(is_blocking_flag));
   context(ctx);
-  if (is_initialized() && (! has_behavior() || is_terminated())) {
-    CAF_LOG_DEBUG_IF(! has_behavior(),
+  if (getf(is_initialized_flag)
+      && (!has_behavior() || getf(is_terminated_flag))) {
+    CAF_LOG_DEBUG_IF(!has_behavior(),
                      "resume called on an actor without behavior");
-    CAF_LOG_DEBUG_IF(is_terminated(),
+    CAF_LOG_DEBUG_IF(getf(is_terminated_flag),
                      "resume called on a terminated actor");
     return false;
   }
 # ifndef CAF_NO_EXCEPTIONS
   try {
 # endif // CAF_NO_EXCEPTIONS
-    if (! is_initialized()) {
+    if (!getf(is_initialized_flag)) {
       initialize();
       if (finalize()) {
         CAF_LOG_DEBUG("actor_done() returned true right after make_behavior()");
         return false;
-      } else {
-        CAF_LOG_DEBUG("initialized actor:" << CAF_ARG(name()));
       }
+      CAF_LOG_DEBUG("initialized actor:" << CAF_ARG(name()));
     }
 # ifndef CAF_NO_EXCEPTIONS
   }
   catch (...) {
     CAF_LOG_ERROR("actor died during initialization");
     auto eptr = std::current_exception();
-    quit(exception_handler_(this, eptr));
+    quit(call_handler(exception_handler_, this, eptr));
     finalize();
     return false;
   }
@@ -510,9 +539,12 @@ bool scheduled_actor::activate(execution_unit* ctx) {
 auto scheduled_actor::activate(execution_unit* ctx, mailbox_element& x)
 -> activation_result {
   CAF_LOG_TRACE(CAF_ARG(x));
-  if (! activate(ctx))
+  if (!activate(ctx))
     return activation_result::terminated;
-  return reactivate(x);
+  auto res = reactivate(x);
+  if (res == activation_result::success && !bhvr_stack_.empty())
+    request_timeout(bhvr_stack_.back().timeout());
+  return res;
 }
 
 auto scheduled_actor::reactivate(mailbox_element& x) -> activation_result {
@@ -539,12 +571,12 @@ auto scheduled_actor::reactivate(mailbox_element& x) -> activation_result {
     CAF_LOG_INFO("actor died because of an exception, what: " << e.what());
     static_cast<void>(e); // keep compiler happy when not logging
     auto eptr = std::current_exception();
-    quit(exception_handler_(this, eptr));
+    quit(call_handler(exception_handler_, this, eptr));
   }
   catch (...) {
     CAF_LOG_INFO("actor died because of an unknown exception");
     auto eptr = std::current_exception();
-    quit(exception_handler_(this, eptr));
+    quit(call_handler(exception_handler_, this, eptr));
   }
   finalize();
   return activation_result::terminated;
@@ -554,7 +586,7 @@ auto scheduled_actor::reactivate(mailbox_element& x) -> activation_result {
 // -- behavior management ----------------------------------------------------
 
 void scheduled_actor::do_become(behavior bhvr, bool discard_old) {
-  if (discard_old && ! bhvr_stack_.empty())
+  if (discard_old && !bhvr_stack_.empty())
     bhvr_stack_.pop_back();
   // request_timeout simply resets the timeout when it's invalid
   request_timeout(bhvr.timeout());
@@ -562,7 +594,7 @@ void scheduled_actor::do_become(behavior bhvr, bool discard_old) {
 }
 
 bool scheduled_actor::finalize() {
-  if (has_behavior() && ! is_terminated())
+  if (has_behavior() && !getf(is_terminated_flag))
     return false;
   CAF_LOG_DEBUG("actor either has no behavior or has set an exit reason");
   on_exit();

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -45,15 +45,13 @@ struct fixture {
     std::set<std::string> ifs;
     scoped_execution_unit context{&system};
     actor_config actor_cfg{&context};
-    std::tie(res, ifs) = system.types().make_actor("test_actor", actor_cfg, args);
+    auto aut = system.spawn<actor>("test_actor", std::move(args));
     if (expect_fail) {
-      CAF_REQUIRE(! res);
+      CAF_REQUIRE(!aut);
       return;
     }
-    CAF_REQUIRE(res);
-    CAF_CHECK(ifs.empty());
-    auto aut = actor_cast<actor>(res);
-    self->wait_for(aut);
+    CAF_REQUIRE(aut);
+    self->wait_for(*aut);
     CAF_MESSAGE("aut done");
   }
 };

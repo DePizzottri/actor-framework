@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -43,15 +43,8 @@ struct none_t : detail::comparable<none_t> {
 static constexpr none_t none = none_t{};
 
 /// @relates none_t
-template <class Processor>
-void serialize(Processor&, const none_t&, const unsigned int) {
-  // nop
-}
-
-/// @relates none_t
-template <class T>
-std::string to_string(const none_t&) {
-  return "<none>";
+inline std::string to_string(const none_t&) {
+  return "none";
 }
 
 } // namespace caf

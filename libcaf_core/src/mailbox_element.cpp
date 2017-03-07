@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -35,7 +35,7 @@ public:
 
   type_erased_tuple& content() override {
     auto ptr = msg_.vals().raw_ptr();
-    if (ptr)
+    if (ptr != nullptr)
       return *ptr;
     return dummy_;
   }
@@ -91,19 +91,6 @@ mailbox_element_ptr make_mailbox_element(strong_actor_ptr sender, message_id id,
   auto ptr = new mailbox_element_wrapper(std::move(sender), id,
                                          std::move(stages), std::move(msg));
   return mailbox_element_ptr{ptr};
-}
-
-std::string to_string(const mailbox_element& x) {
-  std::string result = "mailbox_element(";
-  result += to_string(x.sender);
-  result += ", ";
-  result += to_string(x.mid);
-  result += ", ";
-  result += deep_to_string(x.stages);
-  result += ", ";
-  result += to_string(x.content());
-  result += ")";
-  return result;
 }
 
 } // namespace caf

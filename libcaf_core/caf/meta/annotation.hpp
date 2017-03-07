@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,47 +17,36 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_LEFT_OR_RIGHT_HPP
-#define CAF_DETAIL_LEFT_OR_RIGHT_HPP
+#ifndef CAF_META_ANNOTATION_HPP
+#define CAF_META_ANNOTATION_HPP
 
-#include "caf/unit.hpp"
+#include <type_traits>
 
 namespace caf {
-namespace detail {
+namespace meta {
 
-/// Evaluates to `Right` if `Left` == unit_t, `Left` otherwise.
-template <class Left, typename Right>
-struct left_or_right {
-  using type = Left;
+/// Type tag for all meta annotations in CAF.
+struct annotation {
+  constexpr annotation() {
+    // nop
+  }
 };
 
-template <class Right>
-struct left_or_right<unit_t, Right> {
-  using type = Right;
+template <class T>
+struct is_annotation {
+  static constexpr bool value = std::is_base_of<annotation, T>::value;
 };
 
-template <class Right>
-struct left_or_right<unit_t&, Right> {
-  using type = Right;
-};
+template <class T>
+struct is_annotation<T&> : is_annotation<T> {};
 
-template <class Right>
-struct left_or_right<const unit_t&, Right> {
-  using type = Right;
-};
+template <class T>
+struct is_annotation<const T&> : is_annotation<T> {};
 
-/// Evaluates to `Right` if `Left` != unit_t, `unit_t` otherwise.
-template <class Left, typename Right>
-struct if_not_left {
-  using type = unit_t;
-};
+template <class T>
+struct is_annotation<T&&> : is_annotation<T> {};
 
-template <class Right>
-struct if_not_left<unit_t, Right> {
-  using type = Right;
-};
-
-} // namespace detail
+} // namespace meta
 } // namespace caf
 
-#endif // CAF_DETAIL_LEFT_OR_RIGHT_HPP
+#endif // CAF_META_ANNOTATION_HPP

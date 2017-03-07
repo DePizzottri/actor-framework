@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -39,6 +39,7 @@
 #include "caf/abstract_actor.hpp"
 #include "caf/actor_registry.hpp"
 #include "caf/string_algorithms.hpp"
+#include "caf/named_actor_config.hpp"
 #include "caf/scoped_execution_unit.hpp"
 #include "caf/uniform_type_info_map.hpp"
 #include "caf/composable_behavior_based_actor.hpp"
@@ -64,7 +65,7 @@ struct mpi_field_access {
     if (nr != 0)
       return *types.portable_name(nr, nullptr);
     auto ptr = types.portable_name(0, &typeid(T));
-    if (ptr)
+    if (ptr != nullptr)
       return *ptr;
     std::string result = "<invalid-type[typeid ";
     result += typeid(T).name();
@@ -97,7 +98,7 @@ struct typed_mpi_access;
 
 template <class... Is, class... Ls>
 struct typed_mpi_access<typed_mpi<detail::type_list<Is...>,
-                                  detail::type_list<Ls...>>> {
+                                  output_tuple<Ls...>>> {
   std::string operator()(const uniform_type_info_map& types) const {
     static_assert(sizeof...(Is) > 0, "typed MPI without inputs");
     static_assert(sizeof...(Ls) > 0, "typed MPI without outputs");
@@ -122,8 +123,9 @@ std::string get_rtti_from_mpi(const uniform_type_info_map& types) {
 /// such as a middleman.
 class actor_system {
 public:
-  friend class abstract_actor;
+  friend class logger;
   friend class io::middleman;
+  friend class abstract_actor;
 
   actor_system() = delete;
   actor_system(const actor_system&) = delete;
@@ -162,35 +164,43 @@ public:
 
   using module_array = std::array<module_ptr, module::num_ids>;
 
+  using named_actor_config_map = std::unordered_map<std::string,
+                                                    named_actor_config>;
+
   /// @warning The system stores a reference to `cfg`, which means the
   ///          config object must outlive the actor system.
   explicit actor_system(actor_system_config& cfg);
 
   virtual ~actor_system();
 
-  using message_types_set = std::set<std::string>;
+  /// A message passing interface (MPI) in run-time checkable representation.
+  using mpi = std::set<std::string>;
 
-  inline message_types_set message_types(detail::type_list<scoped_actor>) {
-    return message_types_set{};
+  inline mpi message_types(detail::type_list<scoped_actor>) const {
+    return mpi{};
   }
 
-  inline message_types_set message_types(detail::type_list<actor>) {
-    return message_types_set{};
+  inline mpi message_types(detail::type_list<actor>) const {
+    return mpi{};
+  }
+
+  inline mpi message_types(detail::type_list<strong_actor_ptr>) const {
+    return mpi{};
   }
 
   template <class... Ts>
-  message_types_set message_types(detail::type_list<typed_actor<Ts...>>) {
+  mpi message_types(detail::type_list<typed_actor<Ts...>>) const {
     static_assert(sizeof...(Ts) > 0, "empty typed actor handle given");
-    message_types_set result{get_rtti_from_mpi<Ts>(types())...};
+    mpi result{get_rtti_from_mpi<Ts>(types())...};
     return result;
   }
 
-  inline message_types_set message_types(const actor&) {
-    return message_types_set{};
+  inline mpi message_types(const actor&) const {
+    return mpi{};
   }
 
   template <class... Ts>
-  message_types_set message_types(const typed_actor<Ts...>&) {
+  mpi message_types(const typed_actor<Ts...>&) const {
     detail::type_list<typed_actor<Ts...>> token;
     return message_types(token);
   }
@@ -198,9 +208,28 @@ public:
   /// Returns a string representation of the messaging
   /// interface using portable names;
   template <class T>
-  message_types_set message_types() {
+  mpi message_types() const {
     detail::type_list<T> token;
     return message_types(token);
+  }
+
+  /// Returns whether actor handles described by `xs`
+  /// can be assigned to actor handles described by `ys`.
+  /// @experimental
+  inline bool assignable(const mpi& xs, const mpi& ys) const {
+    if (ys.empty())
+      return xs.empty();
+    if (xs.size() == ys.size())
+      return xs == ys;
+    return std::includes(xs.begin(), xs.end(), ys.begin(), ys.end());
+  }
+
+  /// Returns whether actor handles described by `xs`
+  /// can be assigned to actor handles of type `T`.
+  /// @experimental
+  template <class T>
+  bool assignable(const std::set<std::string>& xs) const {
+    return assignable(xs, message_types<T>());
   }
 
   /// Returns the host-local identifier for this system.
@@ -316,21 +345,45 @@ public:
     return spawn_functor<Os>(cfg, fun, std::forward<Ts>(xs)...);
   }
 
-  template <class T, spawn_options Os = no_spawn_options,
-            class Iter, class F, class... Ts>
+  /// Returns a new actor with run-time type `name`, constructed
+  /// with the arguments stored in `args`.
+  /// @experimental
+  template <class Handle,
+            class E = typename std::enable_if<is_handle<Handle>::value>::type>
+  expected<Handle> spawn(const std::string& name, message args,
+                         execution_unit* ctx = nullptr,
+                         bool check_interface = true,
+                         const mpi* expected_ifs = nullptr) {
+    mpi tmp;
+    if (check_interface && !expected_ifs) {
+      tmp = message_types<Handle>();
+      expected_ifs = &tmp;
+    }
+    auto res = dyn_spawn_impl(name, args, ctx, check_interface, expected_ifs);
+    if (!res)
+      return std::move(res.error());
+    return actor_cast<Handle>(std::move(*res));
+  }
+
+  /// Spawns a class-based actor `T` immediately joining the groups in
+  /// range `[first, last)`.
+  /// @private
+  template <class T, spawn_options Os, class Iter, class... Ts>
   infer_handle_from_class_t<T>
-  spawn_in_groups_impl(actor_config& cfg, Iter first, Iter second, Ts&&... xs) {
+  spawn_class_in_groups(actor_config& cfg, Iter first, Iter last, Ts&&... xs) {
     check_invariants<T>();
-    auto irange = make_input_range(first, second);
+    auto irange = make_input_range(first, last);
     cfg.groups = &irange;
     return spawn_class<T, Os>(cfg, std::forward<Ts>(xs)...);
   }
 
-  template <spawn_options Os = no_spawn_options,
-            class Iter, class F, class... Ts>
+  /// Spawns a class-based actor `T` immediately joining the groups in
+  /// range `[first, last)`.
+  /// @private
+  template <spawn_options Os, class Iter, class F, class... Ts>
   infer_handle_from_fun_t<F>
-  spawn_in_groups_impl(actor_config& cfg, Iter first, Iter second,
-                       F& fun, Ts&&... xs) {
+  spawn_fun_in_groups(actor_config& cfg, Iter first, Iter second,
+                      F& fun, Ts&&... xs) {
     check_invariants<infer_impl_from_fun_t<F>>();
     auto irange = make_input_range(first, second);
     cfg.groups = &irange;
@@ -342,8 +395,8 @@ public:
   infer_handle_from_fun_t<F>
   spawn_in_groups(std::initializer_list<group> gs, F fun, Ts&&... xs) {
     actor_config cfg;
-    return spawn_in_groups_impl(cfg, gs.begin(), gs.end(), fun,
-                                std::forward<Ts>(xs)...);
+    return spawn_fun_in_groups<Os>(cfg, gs.begin(), gs.end(), fun,
+                                   std::forward<Ts>(xs)...);
   }
 
   /// Returns a new functor-based actor subscribed to all groups in `gs`.
@@ -351,15 +404,16 @@ public:
   infer_handle_from_fun_t<F>
   spawn_in_groups(const Gs& gs, F fun, Ts&&... xs) {
     actor_config cfg;
-    return spawn_in_groups_impl(cfg, gs.begin(), gs.end(), fun,
-                                std::forward<Ts>(xs)...);
+    return spawn_fun_in_groups<Os>(cfg, gs.begin(), gs.end(), fun,
+                                   std::forward<Ts>(xs)...);
   }
 
   /// Returns a new functor-based actor subscribed to all groups in `gs`.
   template <spawn_options Os = no_spawn_options, class F, class... Ts>
   infer_handle_from_fun_t<F>
   spawn_in_group(const group& grp, F fun, Ts&&... xs) {
-    return spawn_in_groups({grp}, std::move(fun), std::forward<Ts>(xs)...);
+    return spawn_in_groups<Os>({grp}, std::move(fun),
+                               std::forward<Ts>(xs)...);
   }
 
   /// Returns a new class-based actor subscribed to all groups in `gs`.
@@ -367,8 +421,8 @@ public:
   infer_handle_from_class_t<T>
   spawn_in_groups(std::initializer_list<group> gs, Ts&&... xs) {
     actor_config cfg;
-    return spawn_in_groups_impl<T>(cfg, gs.begin(), gs.end(),
-                                   std::forward<Ts>(xs)...);
+    return spawn_class_in_groups<T, Os>(cfg, gs.begin(), gs.end(),
+                                        std::forward<Ts>(xs)...);
   }
 
   /// Returns a new class-based actor subscribed to all groups in `gs`.
@@ -376,15 +430,15 @@ public:
   infer_handle_from_class_t<T>
   spawn_in_groups(const Gs& gs, Ts&&... xs) {
     actor_config cfg;
-    return spawn_in_groups_impl<T>(cfg, gs.begin(), gs.end(),
-                                   std::forward<Ts>(xs)...);
+    return spawn_class_in_groups<T, Os>(cfg, gs.begin(), gs.end(),
+                                        std::forward<Ts>(xs)...);
   }
 
   /// Returns a new class-based actor subscribed to all groups in `gs`.
   template <class T, spawn_options Os = no_spawn_options, class... Ts>
   infer_handle_from_class_t<T>
   spawn_in_group(const group& grp, Ts&&... xs) {
-    return spawn_in_groups<T>({grp}, std::forward<Ts>(xs)...);
+    return spawn_in_groups<T, Os>({grp}, std::forward<Ts>(xs)...);
   }
 
   /// Returns whether this actor system calls `await_all_actors_done`
@@ -404,6 +458,11 @@ public:
     return cfg_;
   }
 
+    /// Returns configuration parameters for individual named actors types.
+  inline const named_actor_config_map& named_actor_configs() const {
+    return named_actor_configs_;
+  }
+
   /// @cond PRIVATE
 
   /// Increases running-detached-threads-count by one.
@@ -420,10 +479,16 @@ public:
 private:
   template <class T>
   void check_invariants() {
-    static_assert(! std::is_base_of<prohibit_top_level_spawn_marker, T>::value,
+    static_assert(!std::is_base_of<prohibit_top_level_spawn_marker, T>::value,
                   "This actor type cannot be spawned throught an actor system. "
                   "Probably you have tried to spawn a broker or opencl actor.");
   }
+
+  expected<strong_actor_ptr> dyn_spawn_impl(const std::string& name,
+                                            message& args,
+                                            execution_unit* ctx,
+                                            bool check_interface,
+                                            optional<const mpi&> expected_ifs);
 
   template <class C, spawn_options Os, class... Ts>
   infer_handle_from_class_t<C>
@@ -435,13 +500,11 @@ private:
                 : 0;
     if (has_detach_flag(Os) || std::is_base_of<blocking_actor, C>::value)
       cfg.flags |= abstract_actor::is_detached_flag;
-    if (! cfg.host)
+    if (!cfg.host)
       cfg.host = dummy_execution_unit();
+    CAF_SET_LOGGER_SYS(this);
     auto res = make_actor<C>(next_actor_id(), node(), this,
                              cfg, std::forward<Ts>(xs)...);
-    CAF_SET_LOGGER_SYS(this);
-    CAF_LOG_DEBUG("spawned actor:" << CAF_ARG(res.id()));
-    CAF_PUSH_AID(res->id());
     auto ptr = static_cast<C*>(actor_cast<abstract_actor*>(res));
     ptr->launch(cfg.host, has_lazy_init_flag(Os), has_hide_flag(Os));
     return res;
@@ -450,7 +513,7 @@ private:
   std::atomic<size_t> ids_;
   uniform_type_info_map types_;
   node_id node_;
-  caf::logger logger_;
+  intrusive_ptr<caf::logger> logger_;
   actor_registry registry_;
   group_manager groups_;
   module_array modules_;
@@ -464,6 +527,10 @@ private:
   mutable std::mutex detached_mtx;
   mutable std::condition_variable detached_cv;
   actor_system_config& cfg_;
+  std::mutex logger_dtor_mtx_;
+  std::condition_variable logger_dtor_cv_;
+  volatile bool logger_dtor_done_;
+  named_actor_config_map named_actor_configs_;
 };
 
 } // namespace caf

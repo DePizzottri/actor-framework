@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -22,6 +22,8 @@
 #include "caf/error.hpp"
 #include "caf/config.hpp"
 
+#include "caf/detail/try_match.hpp"
+
 namespace caf {
 
 type_erased_tuple::~type_erased_tuple() {
@@ -29,10 +31,12 @@ type_erased_tuple::~type_erased_tuple() {
 }
 
 error type_erased_tuple::load(deserializer& source) {
-  for (size_t i = 0; i < size(); ++i)
-    load(i, source);
-  // TODO: refactor after visit API is in place (#470)
-  return {};
+  for (size_t i = 0; i < size(); ++i) {
+    auto e = load(i, source);
+    if (e)
+      return e;
+  }
+  return none;
 }
 
 bool type_erased_tuple::shared() const noexcept {
@@ -57,10 +61,12 @@ std::string type_erased_tuple::stringify() const {
 }
 
 error type_erased_tuple::save(serializer& sink) const {
-  for (size_t i = 0; i < size(); ++i)
-    save(i, sink);
-  // TODO: refactor after visit API is in place (#470)
-  return {};
+  for (size_t i = 0; i < size(); ++i) {
+    auto e = save(i, sink);
+    if (e)
+      return e;
+  }
+  return none;
 }
 
 bool type_erased_tuple::matches(size_t pos, uint16_t nr,
@@ -70,7 +76,7 @@ bool type_erased_tuple::matches(size_t pos, uint16_t nr,
   if (tp.first != nr)
     return false;
   if (nr == 0)
-    return ptr ? *tp.second == *ptr : false;
+    return ptr != nullptr ? *tp.second == *ptr : false;
   return true;
 }
 

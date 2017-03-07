@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -32,11 +32,9 @@
 #include "caf/detail/int_list.hpp"
 #include "caf/detail/try_match.hpp"
 #include "caf/detail/type_list.hpp"
-#include "caf/detail/tuple_zip.hpp"
 #include "caf/detail/apply_args.hpp"
 #include "caf/detail/type_traits.hpp"
 #include "caf/detail/pseudo_tuple.hpp"
-#include "caf/detail/left_or_right.hpp"
 #include "caf/detail/invoke_result_visitor.hpp"
 
 namespace caf {
@@ -49,7 +47,7 @@ public:
     skip
   };
 
-  match_case(uint32_t token);
+  match_case(uint32_t tt);
 
   match_case(match_case&&) = default;
   match_case(const match_case&) = default;
@@ -129,16 +127,6 @@ public:
       param_decay
     >::type;
 
-  /*
-  static_assert(! std::is_same<pattern, detail::type_list<exit_msg>>::value,
-                "exit_msg not allowed in message handlers, "
-                "did you mean to use set_exit_handler()?");
-
-  static_assert(! std::is_same<pattern, detail::type_list<down_msg>>::value,
-                "down_msg not allowed in message handlers, "
-                "did you mean to use set_down_handler()?");
-  */
-
   using decayed_arg_types =
     typename detail::tl_map<
       arg_types,
@@ -164,21 +152,15 @@ public:
                             type_erased_tuple& xs) override {
     detail::meta_elements<pattern> ms;
     // check if try_match() reports success
-    if (! detail::try_match(xs, ms.arr.data(), ms.arr.size()))
+    if (!detail::try_match(xs, ms.arr.data(), ms.arr.size()))
       return match_case::no_match;
     typename detail::il_indices<decayed_arg_types>::type indices;
     lfinvoker<std::is_same<result_type, void>::value, F> fun{fun_};
     message tmp;
-    intermediate_pseudo_tuple tup{xs.shared()};
-    if (is_manipulator && tup.shared_access) {
+    auto needs_detaching = is_manipulator && xs.shared();
+    if (needs_detaching)
       tmp = message::copy(xs);
-      tup.shared_access = false;
-      for (size_t i = 0; i < tmp.size(); ++i)
-        tup[i] = const_cast<void*>(tmp.at(i));
-    } else {
-      for (size_t i = 0; i < xs.size(); ++i)
-        tup[i] = const_cast<void*>(xs.get(i));
-    }
+    intermediate_pseudo_tuple tup{needs_detaching ? tmp.content() : xs};
     auto fun_res = apply_args(fun, indices, tup);
     return f.visit(fun_res) ? match_case::match : match_case::skip;
   }
@@ -198,7 +180,7 @@ inline bool operator<(const match_case_info& x, const match_case_info& y) {
 
 template <class F>
 typename std::enable_if<
-  ! std::is_base_of<match_case, F>::value,
+  !std::is_base_of<match_case, F>::value,
   std::tuple<trivial_match_case<F>>
 >::type
 to_match_case_tuple(F fun) {
@@ -231,7 +213,7 @@ typename std::enable_if<
   std::is_base_of<match_case, T>::value || std::is_base_of<match_case, U>::value
 >::type
 operator,(T, U) {
-  static_assert(! std::is_same<T, T>::value,
+  static_assert(!std::is_same<T, T>::value,
                 "this syntax is not supported -> you probably did "
                 "something like 'return (...)' instead of 'return {...}'");
 }

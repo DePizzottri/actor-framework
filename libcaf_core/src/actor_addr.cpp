@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -44,9 +44,9 @@ actor_addr::actor_addr(actor_control_block* ptr, bool add_ref)
 intptr_t actor_addr::compare(const actor_control_block* lhs,
                              const actor_control_block* rhs) {
   // invalid actors are always "less" than valid actors
-  if (! lhs)
-    return rhs ? -1 : 0;
-  if (! rhs)
+  if (lhs == nullptr)
+    return rhs != nullptr ? -1 : 0;
+  if (rhs == nullptr)
     return 1;
   // check for identity
   if (lhs == rhs)

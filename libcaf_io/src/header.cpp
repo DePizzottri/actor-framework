@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -63,7 +63,7 @@ bool operator==(const header& lhs, const header& rhs) {
 namespace {
 
 bool valid(const node_id& val) {
-  return val != invalid_node_id;
+  return val != none;
 }
 
 template <class T>
@@ -73,9 +73,9 @@ bool zero(T val) {
 
 bool server_handshake_valid(const header& hdr) {
   return  valid(hdr.source_node)
-       && ! valid(hdr.dest_node)
+       && !valid(hdr.dest_node)
        && zero(hdr.dest_actor)
-       && ! zero(hdr.operation_data);
+       && !zero(hdr.operation_data);
 }
 
 bool client_handshake_valid(const header& hdr) {
@@ -89,8 +89,8 @@ bool client_handshake_valid(const header& hdr) {
 
 bool dispatch_message_valid(const header& hdr) {
   return  valid(hdr.dest_node)
-       && (! zero(hdr.dest_actor) || hdr.has(header::named_receiver_flag))
-       && ! zero(hdr.payload_len);
+       && (!zero(hdr.dest_actor) || hdr.has(header::named_receiver_flag))
+       && !zero(hdr.payload_len);
 }
 
 bool announce_proxy_instance_valid(const header& hdr) {
@@ -98,7 +98,7 @@ bool announce_proxy_instance_valid(const header& hdr) {
        && valid(hdr.dest_node)
        && hdr.source_node != hdr.dest_node
        && zero(hdr.source_actor)
-       && ! zero(hdr.dest_actor)
+       && !zero(hdr.dest_actor)
        && zero(hdr.payload_len)
        && zero(hdr.operation_data);
 }
@@ -107,9 +107,9 @@ bool kill_proxy_instance_valid(const header& hdr) {
   return  valid(hdr.source_node)
        && valid(hdr.dest_node)
        && hdr.source_node != hdr.dest_node
-       && ! zero(hdr.source_actor)
+       && !zero(hdr.source_actor)
        && zero(hdr.dest_actor)
-       && ! zero(hdr.payload_len)
+       && !zero(hdr.payload_len)
        && zero(hdr.operation_data);
 }
 

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -32,11 +32,13 @@ class acceptor_manager : public manager {
 public:
   acceptor_manager(abstract_broker* ptr);
 
-  ~acceptor_manager();
+  ~acceptor_manager() override;
 
-  /// Called by the underlying IO device to indicate that
+  /// Called by the underlying I/O device to indicate that
   /// a new connection is awaiting acceptance.
-  virtual void new_connection() = 0;
+  /// @returns `true` if the manager accepts further connections,
+  ///          otherwise `false`.
+  virtual bool new_connection() = 0;
 };
 
 } // namespace network

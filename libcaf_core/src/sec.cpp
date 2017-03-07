@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,12 +19,14 @@
 
 #include "caf/sec.hpp"
 
+#include "caf/detail/enum_to_string.hpp"
+
 namespace caf {
 
 namespace {
 
 const char* sec_strings[] = {
-  "<no-error>",
+  "none",
   "unexpected_message",
   "unexpected_response",
   "request_receiver_down",
@@ -48,16 +50,19 @@ const char* sec_strings[] = {
   "invalid_protocol_family",
   "cannot_publish_invalid_actor",
   "cannot_spawn_actor_from_arguments",
+  "end_of_stream",
+  "no_context",
+  "unknown_type",
+  "no_proxy_registry",
+  "runtime_error",
+  "remote_linking_failed",
   "bad_function_call"
 };
 
 } // namespace <anonymous>
 
-const char* to_string(sec x) {
-  auto index = static_cast<size_t>(x);
-  if (index > static_cast<size_t>(sec::bad_function_call))
-    return "<unknown>";
-  return sec_strings[index];
+std::string to_string(sec x) {
+  return detail::enum_to_string(x, sec_strings);
 }
 
 error make_error(sec x) {

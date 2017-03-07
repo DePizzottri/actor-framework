@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -104,7 +104,7 @@ public:
 
   /// Checks whether the type of the stored value at position `pos`
   /// matches type number `n` and run-time type information `p`.
-  bool matches(size_t pos, uint16_t n, const std::type_info* p) const  noexcept;
+  bool matches(size_t pos, uint16_t nr, const std::type_info* ptr) const  noexcept;
 
   // -- convenience functions --------------------------------------------------
 
@@ -124,10 +124,45 @@ public:
     return *reinterpret_cast<const T*>(get(pos));
   }
 
+  template <class T, size_t Pos>
+  struct typed_index {};
+
+  template <class T, size_t Pos>
+  static constexpr typed_index<T, Pos> make_typed_index() {
+    return {};
+  }
+
+  template <class T, size_t Pos>
+  const T& get_as(typed_index<T, Pos>) const {
+    return *reinterpret_cast<const T*>(get(Pos));
+  }
+
+  template <class... Ts, long... Is>
+  std::tuple<const Ts&...> get_as_tuple(detail::type_list<Ts...>,
+                                        detail::int_list<Is...>) const {
+    return std::tuple<const Ts&...>{get_as<Ts>(Is)...};
+    //return get_as<Ts>(Is)...;//(make_typed_index<Ts, Is>())...;
+  }
+
+  template <class... Ts>
+  std::tuple<const Ts&...> get_as_tuple() const {
+    return get_as_tuple(detail::type_list<Ts...>{},
+                        typename detail::il_range<0, sizeof...(Ts)>::type{});
+  }
+
   /// Convenience function for `*reinterpret_cast<T*>(get_mutable())`.
   template <class T>
   T& get_mutable_as(size_t pos) {
     return *reinterpret_cast<T*>(get_mutable(pos));
+  }
+
+  /// Convenience function for moving a value out of the tuple if it is
+  /// unshared. Returns a copy otherwise.
+  template <class T>
+  T move_if_unshared(size_t pos) {
+    if (shared())
+      return get_as<T>(pos);
+    return std::move(get_mutable_as<T>(pos));
   }
 
   /// Returns `true` if the element at `pos` matches `T`.
@@ -135,19 +170,15 @@ public:
   bool match_element(size_t pos) const noexcept {
     CAF_ASSERT(pos < size());
     auto x = detail::meta_element_factory<T>::create();
-    return detail::match_element(x, *this, pos);
+    return x.fun(x, *this, pos);
   }
 
   /// Returns `true` if the pattern `Ts...` matches the content of this tuple.
   template <class... Ts>
   bool match_elements() const noexcept {
-    if (sizeof...(Ts) != size())
-      return false;
     detail::meta_elements<detail::type_list<Ts...>> xs;
-    for (size_t i = 0; i < xs.arr.size(); ++i)
-      if (! detail::match_element(xs.arr[i], *this, i))
-        return false;
-    return true;
+    return xs.arr.empty() ? empty()
+                          : detail::try_match(*this, &xs.arr[0], sizeof...(Ts));
   }
 
   template <class F>
@@ -163,22 +194,18 @@ private:
   template <class F, class R, class... Ts>
   optional<R> apply(F& fun, detail::type_list<R>,
                     detail::type_list<Ts...> tk) {
-    if (! match_elements<Ts...>())
+    if (!match_elements<Ts...>())
       return none;
-    detail::pseudo_tuple<typename std::decay<Ts>::type...> xs{shared()};
-    for (size_t i = 0; i < size(); ++i)
-      xs[i] = const_cast<void*>(get(i)); // pseud_tuple figures out const-ness
+    detail::pseudo_tuple<typename std::decay<Ts>::type...> xs{*this};
     return detail::apply_args(fun, detail::get_indices(tk), xs);
   }
 
   template <class F, class... Ts>
   optional<void> apply(F& fun, detail::type_list<void>,
                        detail::type_list<Ts...> tk) {
-    if (! match_elements<Ts...>())
+    if (!match_elements<Ts...>())
       return none;
-    detail::pseudo_tuple<typename std::decay<Ts>::type...> xs{shared()};
-    for (size_t i = 0; i < size(); ++i)
-      xs[i] = const_cast<void*>(get(i)); // pseud_tuple figures out const-ness
+    detail::pseudo_tuple<typename std::decay<Ts>::type...> xs{*this};
     detail::apply_args(fun, detail::get_indices(tk), xs);
     return unit;
   }
@@ -186,14 +213,14 @@ private:
 
 /// @relates type_erased_tuple
 template <class Processor>
-typename std::enable_if<Processor::is_saving::value>::type
+typename std::enable_if<Processor::reads_state>::type
 serialize(Processor& proc, type_erased_tuple& x) {
   x.save(proc);
 }
 
 /// @relates type_erased_tuple
 template <class Processor>
-typename std::enable_if<Processor::is_loading::value>::type
+typename std::enable_if<Processor::writes_state>::type
 serialize(Processor& proc, type_erased_tuple& x) {
   x.load(proc);
 }
@@ -209,7 +236,7 @@ class empty_type_erased_tuple : public type_erased_tuple {
 public:
   empty_type_erased_tuple() = default;
 
-  ~empty_type_erased_tuple();
+  ~empty_type_erased_tuple() override;
 
   void* get_mutable(size_t pos) override;
 

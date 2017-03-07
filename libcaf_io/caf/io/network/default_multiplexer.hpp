@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -44,8 +44,12 @@
 #include "caf/logger.hpp"
 
 #ifdef CAF_WINDOWS
-# define WIN32_LEAN_AND_MEAN
-# define NOMINMAX
+# ifndef WIN32_LEAN_AND_MEAN
+#   define WIN32_LEAN_AND_MEAN
+# endif // WIN32_LEAN_AND_MEAN
+# ifndef NOMINMAX
+#   define NOMINMAX
+# endif
 # ifdef CAF_MINGW
 #   undef _WIN32_WINNT
 #   undef WINVER
@@ -59,12 +63,12 @@
 # include <ws2ipdef.h>
 #else
 # include <unistd.h>
-# include <errno.h>
+# include <cerrno>
 # include <sys/socket.h>
 #endif
 
 // poll xs epoll backend
-#if ! defined(CAF_LINUX) || defined(CAF_POLL_IMPL) // poll() multiplexer
+#if !defined(CAF_LINUX) || defined(CAF_POLL_IMPL) // poll() multiplexer
 # define CAF_POLL_MULTIPLEXER
 # ifndef CAF_WINDOWS
 #   include <poll.h>
@@ -111,7 +115,7 @@ namespace network {
 #endif
 
 // poll vs epoll backend
-#if ! defined(CAF_LINUX) || defined(CAF_POLL_IMPL) // poll() multiplexer
+#if !defined(CAF_LINUX) || defined(CAF_POLL_IMPL) // poll() multiplexer
 # ifdef CAF_WINDOWS
     // From the MSDN: If the POLLPRI flag is set on a socket for the Microsoft
     //                Winsock provider, the WSAPoll function will fail.
@@ -153,7 +157,7 @@ expected<void> nonblocking(native_socket fd, bool new_value);
 expected<void> tcp_nodelay(native_socket fd, bool new_value);
 
 /// Enables or disables `SIGPIPE` events from `fd`.
-expected<void> allow_sigpipe(native_socket fs, bool new_value);
+expected<void> allow_sigpipe(native_socket fd, bool new_value);
 
 /// Reads up to `len` bytes from `fd,` writing the received data
 /// to `buf`. Returns `true` as long as `fd` is readable and `false`
@@ -177,7 +181,7 @@ class default_multiplexer;
 /// A socket I/O event handler.
 class event_handler {
 public:
-  event_handler(default_multiplexer& dm, native_socket fd);
+  event_handler(default_multiplexer& dm, native_socket sockfd);
 
   virtual ~event_handler();
 
@@ -218,7 +222,13 @@ public:
   /// Closes the read channel of the underlying socket.
   void close_read_channel();
 
+  /// Removes the file descriptor from the event loop of the parent.
+  void passivate();
+
 protected:
+  /// Adds the file descriptor to the event loop of the parent.
+  void activate();
+
   void set_fd_flags();
 
   int eventbf_;
@@ -233,7 +243,7 @@ public:
   pipe_reader(default_multiplexer& dm);
   void removed_from_loop(operation op) override;
   void handle_event(operation op) override;
-  void init(native_socket fd);
+  void init(native_socket sock_fd);
   resumable* try_read_next();
 };
 
@@ -263,18 +273,18 @@ public:
   expected<connection_handle> new_tcp_scribe(const std::string &,
                                              uint16_t) override;
 
-  expected<void> assign_tcp_scribe(abstract_broker *ptr,
+  expected<void> assign_tcp_scribe(abstract_broker *self,
                                    connection_handle hdl) override;
 
   connection_handle add_tcp_scribe(abstract_broker *,
                                    native_socket fd) override;
 
   expected<connection_handle> add_tcp_scribe(abstract_broker *,
-                                             const std::string &h,
+                                             const std::string &host,
                                              uint16_t port) override;
 
   expected<std::pair<accept_handle, uint16_t>>
-  new_tcp_doorman(uint16_t p, const char *in, bool rflag) override;
+  new_tcp_doorman(uint16_t port, const char *in, bool reuse_addr) override;
 
   expected<void> assign_tcp_doorman(abstract_broker *ptr,
                                     accept_handle hdl) override;
@@ -288,7 +298,7 @@ public:
 
   explicit default_multiplexer(actor_system* sys);
 
-  ~default_multiplexer();
+  ~default_multiplexer() override;
 
   supervisor_ptr make_supervisor() override;
 
@@ -341,7 +351,7 @@ private:
     }
   }
 
-  void handle(const event& event);
+  void handle(const event& e);
 
   void handle_socket_event(native_socket fd, int mask, event_handler* ptr);
 
@@ -381,7 +391,10 @@ public:
   stream(default_multiplexer& backend_ref, native_socket sockfd);
 
   /// Starts reading data from the socket, forwarding incoming data to `mgr`.
-  void start(const manager_ptr& mgr);
+  void start(stream_manager* mgr);
+
+  /// Activates the stream.
+  void activate(stream_manager* mgr);
 
   /// Configures how much data will be provided for the next `consume` callback.
   /// @warning Must not be called outside the IO multiplexers event loop
@@ -464,7 +477,10 @@ public:
   /// Starts this acceptor, forwarding all incoming connections to
   /// `manager`. The intrusive pointer will be released after the
   /// acceptor has been closed or an IO error occured.
-  void start(const manager_ptr& mgr);
+  void start(acceptor_manager* mgr);
+
+  /// Activates the acceptor.
+  void activate(acceptor_manager* mgr);
 
   /// Closes the network connection and removes this handler from its parent.
   void stop_reading();

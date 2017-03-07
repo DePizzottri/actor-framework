@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -22,10 +22,12 @@
 
 #include <new>
 #include <functional>
+#include <utility>
 
 #include "caf/expected.hpp"
 #include "caf/typed_actor.hpp"
 #include "caf/scoped_actor.hpp"
+#include "caf/response_type.hpp"
 
 namespace caf {
 
@@ -112,6 +114,10 @@ struct function_view_flattened_result<std::tuple<void>> {
 };
 
 template <class T>
+using function_view_flattened_result_t =
+  typename function_view_flattened_result<T>::type;
+
+template <class T>
 struct function_view_result {
   T value;
 };
@@ -119,11 +125,6 @@ struct function_view_result {
 template <class... Ts>
 struct function_view_result<typed_actor<Ts...>> {
   typed_actor<Ts...> value{unsafe_actor_handle_init};
-};
-
-template <>
-struct function_view_result<actor> {
-  actor value{unsafe_actor_handle_init};
 };
 
 /// A function view for an actor hides any messaging from the caller.
@@ -135,50 +136,53 @@ class function_view {
 public:
   using type = Actor;
 
-  function_view() : impl_(unsafe_actor_handle_init) {
+  function_view(duration rel_timeout = infinite) : timeout(rel_timeout) {
     // nop
   }
 
-  function_view(const type& impl) : impl_(impl) {
+  function_view(type  impl, duration rel_timeout = infinite)
+      : timeout(rel_timeout),
+        impl_(std::move(impl)) {
     new_self(impl_);
   }
 
   ~function_view() {
-    if (! impl_.unsafe())
+    if (impl_)
       self_.~scoped_actor();
   }
 
-  function_view(function_view&& x) : impl_(std::move(x.impl_)) {
-    if (! impl_.unsafe()) {
+  function_view(function_view&& x)
+      : timeout(x.timeout),
+        impl_(std::move(x.impl_)) {
+    if (impl_) {
       new (&self_) scoped_actor(impl_.home_system()); //(std::move(x.self_));
       x.self_.~scoped_actor();
     }
   }
 
   function_view& operator=(function_view&& x) {
+    timeout = x.timeout;
     assign(x.impl_);
-    x.assign(unsafe_actor_handle_init);
+    x.reset();
     return *this;
   }
 
   /// Sends a request message to the assigned actor and returns the result.
   template <class... Ts,
             class R =
-              typename function_view_flattened_result<
-                typename detail::deduce_output_type<
-                  type,
-                  detail::type_list<
-                    typename detail::implicit_conversions<
-                      typename std::decay<Ts>::type
-                    >::type...>
-                >::tuple_type
-              >::type>
+              function_view_flattened_result_t<
+                typename response_type<
+                  typename type::signatures,
+                  detail::implicit_conversions_t<
+                    typename std::decay<Ts>::type
+                  >...
+                >::tuple_type>>
   expected<R> operator()(Ts&&... xs) {
-    if (impl_.unsafe())
+    if (!impl_)
       return sec::bad_function_call;
     error err;
     function_view_result<R> result;
-    self_->request(impl_, infinite, std::forward<Ts>(xs)...).receive(
+    self_->request(impl_, timeout, std::forward<Ts>(xs)...).receive(
       [&](error& x) {
         err = std::move(x);
       },
@@ -190,17 +194,24 @@ public:
   }
 
   void assign(type x) {
-    if (impl_.unsafe() && ! x.unsafe())
+    if (!impl_ && x)
       new_self(x);
-    if (! impl_.unsafe() && x.unsafe())
+    if (impl_ && !x)
       self_.~scoped_actor();
     impl_.swap(x);
   }
 
+  void reset() {
+    self_.~scoped_actor();
+    impl_ = type();
+  }
+
   /// Checks whether this function view has an actor assigned to it.
   explicit operator bool() const {
-    return ! impl_.unsafe();
+    return static_cast<bool>(impl_);
   }
+
+  duration timeout;
 
 private:
   template <class T>
@@ -214,7 +225,7 @@ private:
   }
 
   void new_self(const Actor& x) {
-    if (! x.unsafe())
+    if (x)
       new (&self_) scoped_actor(x->home_system());
   }
 
@@ -225,7 +236,7 @@ private:
 /// @relates function_view
 template <class T>
 bool operator==(const function_view<T>& x, std::nullptr_t) {
-  return ! x;
+  return !x;
 }
 
 /// @relates function_view
@@ -237,21 +248,21 @@ bool operator==(std::nullptr_t x, const function_view<T>& y) {
 /// @relates function_view
 template <class T>
 bool operator!=(const function_view<T>& x, std::nullptr_t y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates function_view
 template <class T>
 bool operator!=(std::nullptr_t x, const function_view<T>& y) {
-  return ! (y == x);
+  return !(y == x);
 }
 
 /// Creates a new function view for `x`.
 /// @relates function_view
 /// @experimental
 template <class T>
-function_view<T> make_function_view(const T& x) {
-  return {x};
+function_view<T> make_function_view(const T& x, duration t = infinite) {
+  return {x, t};
 }
 
 } // namespace caf

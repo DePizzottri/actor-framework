@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -34,7 +34,6 @@
 
 #include "caf/detail/try_match.hpp"
 #include "caf/detail/apply_args.hpp"
-#include "caf/detail/pseudo_tuple.hpp"
 
 namespace caf {
 namespace detail {
@@ -68,9 +67,7 @@ public:
   }
 
   error load(size_t pos, deserializer& source) override {
-    ptrs_[pos]->load(source);
-    // TODO: refactor after visit API is in place (#470)
-    return {};
+    return ptrs_[pos]->load(source);
   }
 
   // -- overridden observers ---------------------------------------------------

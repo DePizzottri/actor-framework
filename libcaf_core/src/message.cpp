@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -20,6 +20,8 @@
 #include "caf/message.hpp"
 
 #include <iostream>
+#include <utility>
+#include <utility>
 
 #include "caf/serializer.hpp"
 #include "caf/actor_system.hpp"
@@ -34,11 +36,15 @@
 
 namespace caf {
 
+message::message(none_t) noexcept {
+  // nop
+}
+
 message::message(message&& other) noexcept : vals_(std::move(other.vals_)) {
   // nop
 }
 
-message::message(const data_ptr& ptr) noexcept : vals_(ptr) {
+message::message(data_ptr ptr) noexcept : vals_(std::move(ptr)) {
   // nop
 }
 
@@ -140,11 +146,11 @@ message message::extract_impl(size_t start, message_handler handler) const {
 }
 
 message message::extract(message_handler handler) const {
-  return extract_impl(0, handler);
+  return extract_impl(0, std::move(handler));
 }
 
 message::cli_res message::extract_opts(std::vector<cli_arg> xs,
-                                       help_factory f, bool no_help) const {
+                                       const help_factory& f, bool no_help) const {
   std::string helpstr;
   auto make_error = [&](std::string err) -> cli_res {
     return {*this, std::set<std::string>{}, std::move(helpstr), std::move(err)};
@@ -161,8 +167,8 @@ message::cli_res message::extract_opts(std::vector<cli_arg> xs,
     return s[0] == "help"
            || std::find_if(s.begin() + 1, s.end(), has_short_help) != s.end();
   };
-  if (! no_help && std::none_of(xs.begin(), xs.end(), pred)) {
-    xs.push_back(cli_arg{"help,h,?", "print this text"});
+  if (!no_help && std::none_of(xs.begin(), xs.end(), pred)) {
+    xs.emplace_back("help,h,?", "print this text");
   }
   std::map<std::string, cli_arg*> shorts;
   std::map<std::string, cli_arg*> longs;
@@ -241,7 +247,7 @@ message::cli_res message::extract_opts(std::vector<cli_arg> xs,
           // this short opt expects two arguments
           if (arg.size() > 2) {
              // this short opt comes with a value (no space), e.g., -x2
-            if (! i->second->fun(arg.substr(2))) {
+            if (!i->second->fun(arg.substr(2))) {
               error = "invalid value for " + i->second->name + ": " + arg;
               return skip();
             }
@@ -250,9 +256,9 @@ message::cli_res message::extract_opts(std::vector<cli_arg> xs,
           }
           // no value given, try two-argument form below
           return skip();
-        } else if (i->second->flag) {
-          *i->second->flag = true;
         }
+        if (i->second->flag != nullptr)
+          *i->second->flag = true;
         insert_opt_name(i->second);
         return none;
       }
@@ -264,15 +270,15 @@ message::cli_res message::extract_opts(std::vector<cli_arg> xs,
             error =  "missing argument to " + arg;
             return skip();
           }
-          if (! j->second->fun(arg.substr(eq_pos + 1))) {
+          if (!j->second->fun(arg.substr(eq_pos + 1))) {
             error = "invalid value for " + j->second->name + ": " + arg;
             return skip();
           }
           insert_opt_name(j->second);
           return none;
-        } else if (j->second->flag) {
-          *j->second->flag = true;
         }
+        if (j->second->flag != nullptr)
+          *j->second->flag = true;
         insert_opt_name(j->second);
         return none;
       }
@@ -286,14 +292,14 @@ message::cli_res message::extract_opts(std::vector<cli_arg> xs,
       }
       auto i = shorts.find(arg1.substr(0, 2));
       if (i != shorts.end()) {
-        if (! i->second->fun || arg1.size() > 2) {
+        if (!i->second->fun || arg1.size() > 2) {
           // this short opt either expects no argument or comes with a value
           // (no  space), e.g., -x2, so we have to parse it with the
           // one-argument form above
           return skip();
         }
         CAF_ASSERT(arg1.size() == 2);
-        if (! i->second->fun(arg2)) {
+        if (!i->second->fun(arg2)) {
           error = "invalid value for option " + i->second->name + ": " + arg2;
           return skip();
         }
@@ -378,52 +384,61 @@ message message::concat_impl(std::initializer_list<data_ptr> xs) {
   }
 }
 
-void serialize(serializer& sink, const message& msg, const unsigned int) {
-  if (! sink.context())
-    CAF_RAISE_ERROR("Cannot serialize message without context.");
+error inspect(serializer& sink, message& msg) {
+  if (sink.context() == nullptr)
+    return sec::no_context;
   // build type name
   uint16_t zero = 0;
   std::string tname = "@<>";
-  if (msg.empty()) {
-    sink.begin_object(zero, tname);
-    sink.end_object();
-    return;
-  }
+  if (msg.empty())
+    return error::eval([&] { return sink.begin_object(zero, tname); },
+                       [&] { return sink.end_object(); });
   auto& types = sink.context()->system().types();
   auto n = msg.size();
   for (size_t i = 0; i < n; ++i) {
     auto rtti = msg.cvals()->type(i);
     auto ptr = types.portable_name(rtti);
-    if (! ptr) {
+    if (ptr == nullptr) {
       std::cerr << "[ERROR]: cannot serialize message because a type was "
                    "not added to the types list, typeid name: "
-                << (rtti.second ? rtti.second->name() : "-not-available-")
+                << (rtti.second != nullptr ? rtti.second->name() : "-not-available-")
                 << std::endl;
-      CAF_RAISE_ERROR("unknown type while serializing");
+      return make_error(sec::unknown_type,
+                        rtti.second != nullptr ? rtti.second->name() : "-not-available-");
     }
     tname += '+';
     tname += *ptr;
   }
-  sink.begin_object(zero, tname);
-  for (size_t i = 0; i < n; ++i)
-    msg.cvals()->save(i, sink);
-  sink.end_object();
+  auto save_loop = [&]() -> error {
+    for (size_t i = 0; i < n; ++i) {
+      auto e = msg.cvals()->save(i, sink);
+      if (e)
+        return e;
+    }
+    return none;
+  };
+  return error::eval([&] { return sink.begin_object(zero, tname); },
+                     [&] { return save_loop();  },
+                     [&] { return sink.end_object(); });
 }
 
-void serialize(deserializer& source, message& msg, const unsigned int) {
-  if (! source.context())
-    CAF_RAISE_ERROR("Cannot deserialize message without context.");
+error inspect(deserializer& source, message& msg) {
+  if (source.context() == nullptr)
+    return sec::no_context;
   uint16_t zero;
   std::string tname;
-  source.begin_object(zero, tname);
+  error err;
+  err = source.begin_object(zero, tname);
+  if (err)
+    return err;
   if (zero != 0)
-    CAF_RAISE_ERROR("unexpected builtin type found in message");
+    return sec::unknown_type;
   if (tname == "@<>") {
     msg = message{};
-    return;
+    return none;
   }
   if (tname.compare(0, 4, "@<>+") != 0)
-    CAF_RAISE_ERROR("type name does not start with @<>+: " + tname);
+    return sec::unknown_type;
   // iterate over concatenated type names
   auto eos = tname.end();
   auto next = [&](std::string::iterator iter) {
@@ -438,18 +453,23 @@ void serialize(deserializer& source, message& msg, const unsigned int) {
     auto n = next(i);
     tmp.assign(i, n);
     auto ptr = types.make_value(tmp);
-    if (! ptr)
-      CAF_RAISE_ERROR("cannot serialize a value of type " + tmp);
-    ptr->load(source);
+    if (!ptr)
+      return make_error(sec::unknown_type, tmp);
+    err = ptr->load(source);
+    if (err)
+      return err;
     dmd->append(std::move(ptr));
     if (n != eos)
       i = n + 1;
     else
       i = eos;
   } while (i != eos);
-  source.end_object();
+  err = source.end_object();
+  if (err)
+    return err;
   message result{std::move(dmd)};
   msg.swap(result);
+  return none;
 }
 
 std::string to_string(const message& msg) {

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  * Raphael Hiesgen <raphael.hiesgen (at) haw-hamburg.de>                      *
  *                                                                            *
@@ -39,6 +39,9 @@ CAF_POP_WARNINGS
 namespace caf {
 namespace io {
 namespace network {
+
+/// Low-level error code.
+using error_code = boost::system::error_code;
 
 /// Low-level backend for IO multiplexing.
 using io_service = boost::asio::io_service;
@@ -134,10 +137,13 @@ public:
   using buffer_type = std::vector<char>;
 
   asio_stream(asio_multiplexer& ref)
-      : writing_(false),
+      : reading_(false),
+        writing_(false),
         ack_writes_(false),
         fd_(ref.service()),
-        backend_(ref) {
+        backend_(ref),
+        rd_buf_ready_(false),
+        async_read_pending_(false) {
     configure_read(receive_policy::at_most(1024));
   }
 
@@ -157,9 +163,9 @@ public:
   }
 
   /// Starts reading data from the socket, forwarding incoming data to `mgr`.
-  void start(const manager_ptr& mgr) {
+  void start(stream_manager* mgr) {
     CAF_ASSERT(mgr != nullptr);
-    read_loop(mgr);
+    activate(mgr);
   }
 
   /// Configures how much data will be provided for the next `consume` callback.
@@ -201,7 +207,7 @@ public:
   ///          once the stream has been started.
   void flush(const manager_ptr& mgr) {
     CAF_ASSERT(mgr != nullptr);
-    if (! wr_offline_buf_.empty() && ! writing_) {
+    if (!wr_offline_buf_.empty() && !writing_) {
       writing_ = true;
       write_loop(mgr);
     }
@@ -215,7 +221,7 @@ public:
 
   void stop_reading() {
     CAF_LOG_TRACE("");
-    boost::system::error_code ec; // ignored
+    error_code ec; // ignored
     fd_.shutdown(boost::asio::ip::tcp::socket::shutdown_receive, ec);
   }
 
@@ -223,29 +229,64 @@ public:
     return backend_;
   }
 
+  /// Activates the stream.
+  void activate(stream_manager* mgr) {
+    reading_ = true;
+    read_loop(mgr);
+  }
+
+  /// Stops activity of the stream.
+  void passivate() {
+    reading_ = false;
+  }
+
 private:
-  void read_loop(const manager_ptr& mgr) {
-    auto cb = [=](const boost::system::error_code& ec, size_t read_bytes) {
+  bool read_one(stream_manager* ptr, size_t num_bytes) {
+    if (!reading_) {
+      // broker was passivated while async read was on its way
+      rd_buf_ready_ = true;
+      // make sure buf size matches read_bytes in case of async_read
+      if (rd_buf_.size() != num_bytes)
+        rd_buf_.resize(num_bytes);
+      return false;
+    }
+    if (ptr->consume(&backend(), rd_buf_.data(), num_bytes))
+      return reading_;
+    return false;
+  }
+
+  void read_loop(manager_ptr mgr) {
+    if (async_read_pending_)
+      return;
+    if (rd_buf_ready_) {
+      rd_buf_ready_ = false;
+      if (read_one(mgr.get(), rd_buf_.size()))
+        read_loop(std::move(mgr));
+      return;
+    }
+    auto cb = [=](const error_code& ec, size_t read_bytes) mutable {
+      async_read_pending_ = false;
       CAF_LOG_TRACE("");
-      if (! ec) {
-        mgr->consume(&backend(), rd_buf_.data(), read_bytes);
-        read_loop(mgr);
+      if (!ec) {
+        // bail out early in case broker passivated stream in the meantime
+        if (read_one(mgr.get(), read_bytes))
+          read_loop(std::move(mgr));
       } else {
         mgr->io_failure(&backend(), operation::read);
       }
     };
     switch (rd_flag_) {
       case receive_policy_flag::exactly:
-        if (rd_buf_.size() < rd_size_) {
+        if (rd_buf_.size() < rd_size_)
           rd_buf_.resize(rd_size_);
-        }
+        async_read_pending_ = true;
         boost::asio::async_read(fd_, boost::asio::buffer(rd_buf_, rd_size_),
                                 cb);
         break;
       case receive_policy_flag::at_most:
-        if (rd_buf_.size() < rd_size_) {
+        if (rd_buf_.size() < rd_size_)
           rd_buf_.resize(rd_size_);
-        }
+        async_read_pending_ = true;
         fd_.async_read_some(boost::asio::buffer(rd_buf_, rd_size_), cb);
         break;
       case receive_policy_flag::at_least: {
@@ -269,7 +310,7 @@ private:
     wr_buf_.swap(wr_offline_buf_);
     boost::asio::async_write(
       fd_, boost::asio::buffer(wr_buf_),
-      [=](const boost::system::error_code& ec, size_t nb) {
+      [=](const error_code& ec, size_t nb) {
         CAF_LOG_TRACE("");
         if (ec) {
           CAF_LOG_DEBUG(CAF_ARG(ec.message()));
@@ -284,18 +325,20 @@ private:
       });
   }
 
-  void collect_data(const manager_ptr& mgr, size_t collected_bytes) {
+  void collect_data(manager_ptr mgr, size_t collected_bytes) {
+    async_read_pending_ = true;
     fd_.async_read_some(boost::asio::buffer(rd_buf_.data() + collected_bytes,
                                             rd_buf_.size() - collected_bytes),
-                        [=](const boost::system::error_code& ec, size_t nb) {
+                        [=](const error_code& ec, size_t nb) mutable {
+      async_read_pending_ = false;
       CAF_LOG_TRACE(CAF_ARG(nb));
-      if (! ec) {
+      if (!ec) {
         auto sum = collected_bytes + nb;
         if (sum >= rd_size_) {
-          mgr->consume(&backend(), rd_buf_.data(), sum);
-          read_loop(mgr);
+          if (read_one(mgr.get(), sum))
+            read_loop(std::move(mgr));
         } else {
-          collect_data(mgr, sum);
+          collect_data(std::move(mgr), sum);
         }
       } else {
         mgr->io_failure(&backend(), operation::write);
@@ -303,15 +346,42 @@ private:
     });
   }
 
+  /// Set if read loop was started by user and unset if passivate is called.
+  bool reading_;
+
+  /// Set on flush, also indicates that an async_write is pending.
   bool writing_;
+
+  /// Stores whether user requested ACK messages for async writes.
   bool ack_writes_;
+
+  /// TCP socket for this connection.
   Socket fd_;
+
+  /// Configures how chunk sizes are calculated.
   receive_policy_flag rd_flag_;
+
+  /// Minimum, maximum, or exact size of a chunk, depending on `rd_flag_`.
   size_t rd_size_;
+
+  /// Input buffer.
   buffer_type rd_buf_;
+
+  /// Output buffer for ASIO.
   buffer_type wr_buf_;
+
+  /// Swapped with `wr_buf_` before next write. Users write into this buffer
+  /// as long as `wr_buf_` is processed by ASIO.
   buffer_type wr_offline_buf_;
+
+  /// Reference to our I/O backend.
   asio_multiplexer& backend_;
+
+  /// Signalizes that a scribe was passivated while an async read was pending.
+  bool rd_buf_ready_;
+
+  /// Makes sure no more than one async_read is pending at any given time
+  bool async_read_pending_;
 };
 
 /// An acceptor is responsible for accepting incoming connections.
@@ -328,9 +398,12 @@ public:
   using manager_ptr = intrusive_ptr<manager_type>;
 
   asio_acceptor(asio_multiplexer& am, io_service& io)
-      : backend_(am),
+      : accepting_(false),
+        backend_(am),
         accept_fd_(io),
-        fd_(io) {
+        fd_valid_(false),
+        fd_(io),
+        async_accept_pending_(false) {
     // nop
   }
 
@@ -361,8 +434,19 @@ public:
   /// Starts this acceptor, forwarding all incoming connections to
   /// `manager`. The intrusive pointer will be released after the
   /// acceptor has been closed or an IO error occured.
-  void start(const manager_ptr& mgr) {
+  void start(manager_type* mgr) {
+    activate(mgr);
+  }
+
+  /// Starts the accept loop.
+  void activate(manager_type* mgr) {
+    accepting_ = true;
     accept_loop(mgr);
+  }
+
+  /// Starts the accept loop.
+  void passivate() {
+    accepting_ = false;
   }
 
   /// Closes the network connection, thus stopping this acceptor.
@@ -371,23 +455,48 @@ public:
   }
 
 private:
-  void accept_loop(const manager_ptr& mgr) {
-    accept_fd_.async_accept(fd_, [=](const boost::system::error_code& ec) {
+  bool accept_one(manager_type* mgr) {
+    auto res = mgr->new_connection(); // moves fd_
+    // reset fd_ for next accept operation
+    fd_ = socket_type{accept_fd_.get_io_service()};
+    return res && accepting_;
+  }
+
+  void accept_loop(manager_ptr mgr) {
+    if (async_accept_pending_)
+      return;
+    // accept "cached" connection first
+    if (fd_valid_) {
+      fd_valid_ = false;
+      if (accept_one(mgr.get()))
+        accept_loop(std::move(mgr));
+      return;
+    }
+    async_accept_pending_ = true;
+    accept_fd_.async_accept(fd_, [=](const error_code& ec) mutable {
       CAF_LOG_TRACE("");
-      if (! ec) {
-        mgr->new_connection(); // probably moves fd_
-        // reset fd_ for next accept operation
-        fd_ = socket_type{accept_fd_.get_io_service()};
-        accept_loop(mgr);
+      async_accept_pending_ = false;
+      if (!ec) {
+        // if broker has passivated this in the meantime, cache fd_ for later
+        if (!accepting_) {
+          fd_valid_ = true;
+          return;
+        }
+        if (accept_one(mgr.get()))
+          accept_loop(std::move(mgr));
       } else {
         mgr->io_failure(&backend(), operation::read);
       }
     });
   }
 
+  bool accepting_;
   asio_multiplexer& backend_;
   SocketAcceptor accept_fd_;
+  bool fd_valid_;
   socket_type fd_;
+  /// Makes sure no more than one async_accept is pending at any given time
+  bool async_accept_pending_;
 };
 
 } // namesapce network

@@ -27,7 +27,6 @@ set (LIBCAF_CORE_SRCS
      src/actor_registry.cpp
      src/actor_system.cpp
      src/actor_system_config.cpp
-     src/adapter.cpp
      src/atom.cpp
      src/attachable.cpp
      src/behavior.cpp
@@ -39,8 +38,6 @@ set (LIBCAF_CORE_SRCS
      src/config_option.cpp
      src/continue_helper.cpp
      src/decorated_tuple.cpp
-     src/default_invoke_result_visitor.cpp
-     src/deep_to_string.cpp
      src/default_attachable.cpp
      src/deserializer.cpp
      src/duration.cpp
@@ -89,6 +86,10 @@ set (LIBCAF_CORE_SRCS
      src/skip.cpp
      src/splitter.cpp
      src/sync_request_bouncer.cpp
+     src/stringification_inspector.cpp
+     src/test_coordinator.cpp
+     src/term.cpp
+     src/timestamp.cpp
      src/try_match.cpp
      src/type_erased_value.cpp
      src/type_erased_tuple.cpp
@@ -108,7 +109,9 @@ if (NOT CAF_BUILD_STATIC_ONLY)
                         SOVERSION ${CAF_VERSION}
                         VERSION ${CAF_VERSION}
                         OUTPUT_NAME caf_core)
-  if(NOT WIN32)
+  if (CYGWIN)
+    install(TARGETS libcaf_core_shared RUNTIME DESTINATION bin)
+  elseif (NOT WIN32)
     install(TARGETS libcaf_core_shared LIBRARY DESTINATION lib)
   endif()
   add_dependencies(libcaf_core_shared libcaf_core)

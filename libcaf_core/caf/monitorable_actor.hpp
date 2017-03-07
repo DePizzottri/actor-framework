@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -58,35 +58,31 @@ public:
   /// Links this actor to `x`.
   void link_to(const actor_addr& x) {
     auto ptr = actor_cast<strong_actor_ptr>(x);
-    if (! ptr || ptr->get() == this)
-      return;
-    link_impl(establish_link_op, ptr->get());
+    if (ptr && ptr->get() != this)
+      link_impl(establish_link_op, ptr->get());
   }
 
   /// Links this actor to `x`.
   template <class ActorHandle>
   void link_to(const ActorHandle& x) {
     auto ptr = actor_cast<abstract_actor*>(x);
-    if (! ptr || ptr == this)
-      return;
-    link_impl(establish_link_op, ptr);
+    if (ptr && ptr != this)
+      link_impl(establish_link_op, ptr);
   }
 
   /// Unlinks this actor from `x`.
   void unlink_from(const actor_addr& x) {
     auto ptr = actor_cast<strong_actor_ptr>(x);
-    if (! ptr || ptr->get() == this)
-      return;
-    link_impl(remove_link_op, ptr->get());
+    if (ptr && ptr->get() != this)
+      link_impl(remove_link_op, ptr->get());
   }
 
   /// Links this actor to `x`.
   template <class ActorHandle>
   void unlink_from(const ActorHandle& x) {
     auto ptr = actor_cast<abstract_actor*>(x);
-    if (! ptr || ptr == this)
-      return;
-    link_impl(remove_link_op, ptr);
+    if (ptr && ptr != this)
+      link_impl(remove_link_op, ptr);
   }
 
   /// @cond PRIVATE
@@ -119,15 +115,15 @@ protected:
    *                 here be dragons: end of public interface                 *
    ****************************************************************************/
 
-  bool link_impl(linking_operation op, abstract_actor* x) override;
+  bool link_impl(linking_operation op, abstract_actor* other) override;
 
-  bool establish_link_impl(abstract_actor* other);
+  bool establish_link_impl(abstract_actor* x);
 
-  bool remove_link_impl(abstract_actor* other);
+  bool remove_link_impl(abstract_actor* x);
 
-  bool establish_backlink_impl(abstract_actor* other);
+  bool establish_backlink_impl(abstract_actor* x);
 
-  bool remove_backlink_impl(abstract_actor* other);
+  bool remove_backlink_impl(abstract_actor* x);
 
   // precondition: `mtx_` is acquired
   inline void attach_impl(attachable_ptr& ptr) {
@@ -138,12 +134,12 @@ protected:
   // precondition: `mtx_` is acquired
   static size_t detach_impl(const attachable::token& what,
                             attachable_ptr& ptr,
-                            bool stop_on_first_hit = false,
+                            bool stop_on_hit = false,
                             bool dry_run = false);
 
   // handles only `exit_msg` and `sys_atom` messages;
   // returns true if the message is handled
-  bool handle_system_message(mailbox_element& node, execution_unit* context,
+  bool handle_system_message(mailbox_element& x, execution_unit* ctx,
                              bool trap_exit);
 
   // handles `exit_msg`, `sys_atom` messages, and additionally `down_msg`

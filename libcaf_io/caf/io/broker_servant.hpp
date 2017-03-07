@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -38,12 +38,35 @@ public:
       : Base(ptr),
         hdl_(x),
         value_(strong_actor_ptr{}, message_id::make(),
-               mailbox_element::forwarding_stack{}, SysMsgType{}) {
-    set_hdl(msg(), x);
+               mailbox_element::forwarding_stack{}, SysMsgType{x, {}}) {
+    // nop
   }
 
   Handle hdl() const {
     return hdl_;
+  }
+
+  void halt() {
+    activity_tokens_ = none;
+    this->remove_from_loop();
+  }
+
+  void trigger() {
+    activity_tokens_ = none;
+    this->add_to_loop();
+  }
+
+  void trigger(size_t num) {
+    CAF_ASSERT(num > 0);
+    if (activity_tokens_)
+      *activity_tokens_ += num;
+    else
+      activity_tokens_ = num;
+    this->add_to_loop();
+  }
+
+  inline optional<size_t> activity_tokens() const {
+    return activity_tokens_;
   }
 
 protected:
@@ -51,7 +74,7 @@ protected:
     ptr->erase(hdl_);
   }
 
-  void invoke_mailbox_element(execution_unit* ctx) {
+  void invoke_mailbox_element_impl(execution_unit* ctx, mailbox_element& x) {
     auto self = this->parent();
     auto pfac = self->proxy_registry_ptr();
     if (pfac)
@@ -60,23 +83,42 @@ protected:
       if (pfac)
         ctx->proxy_registry_ptr(nullptr);
     });
-    self->activate(ctx, value_);
+    self->activate(ctx, x);
+  }
+
+  bool invoke_mailbox_element(execution_unit* ctx) {
+    // hold on to a strong reference while "messing" with the parent actor
+    strong_actor_ptr ptr_guard{this->parent()->ctrl()};
+    auto prev = activity_tokens_;
+    invoke_mailbox_element_impl(ctx, value_);
+    // only consume an activity token if actor did not produce them now
+    if (prev && activity_tokens_ && --(*activity_tokens_) == 0) {
+      if (this->parent()->getf(abstract_actor::is_terminated_flag))
+        return false;
+      // tell broker it entered passive mode, this can result in
+      // producing, why we check the condition again afterwards
+      using passiv_t =
+        typename std::conditional<
+          std::is_same<Handle, connection_handle>::value,
+          connection_passivated_msg,
+          acceptor_passivated_msg
+        >::type;
+        using tmp_t = mailbox_element_vals<passiv_t>;
+        tmp_t tmp{strong_actor_ptr{},                  message_id::make(),
+                  mailbox_element::forwarding_stack{}, passiv_t{hdl()}};
+        invoke_mailbox_element_impl(ctx, tmp);
+        return activity_tokens_ != size_t{0};
+    }
+    return true;
   }
 
   SysMsgType& msg() {
     return value_.template get_mutable_as<SysMsgType>(0);
   }
 
-  static void set_hdl(new_connection_msg& lhs, Handle& hdl) {
-    lhs.source = hdl;
-  }
-
-  static void set_hdl(new_data_msg& lhs, Handle& hdl) {
-    lhs.handle = hdl;
-  }
-
   Handle hdl_;
   mailbox_element_vals<SysMsgType> value_;
+  optional<size_t> activity_tokens_;
 };
 
 } // namespace io

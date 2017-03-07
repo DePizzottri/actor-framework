@@ -11,9 +11,9 @@
 #include <net/if_dl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <sstream>
 
@@ -66,7 +66,7 @@ std::vector<iface_info> get_mac_addresses() {
     }
     auto addr = oss.str();
     if (addr != "00:00:00:00:00:00") {
-      result.push_back({i->if_name, std::move(addr)});
+      result.emplace_back(i->if_name, std::move(addr));
     }
   }
   if_freenameindex(indices);
@@ -76,7 +76,7 @@ std::vector<iface_info> get_mac_addresses() {
 } // namespace detail
 } // namespace caf
 
-#elif defined(CAF_LINUX) || defined(CAF_ANDROID)
+#elif defined(CAF_LINUX) || defined(CAF_ANDROID) || defined(CAF_CYGWIN)
 
 #include <vector>
 #include <string>
@@ -203,7 +203,7 @@ std::vector<iface_info> get_mac_addresses() {
   size_t iterations = 0;
   do {
     addresses.reset((IP_ADAPTER_ADDRESSES*)malloc(addresses_len));
-    if (! addresses) {
+    if (!addresses) {
       perror("Memory allocation failed for IP_ADAPTER_ADDRESSES struct");
       exit(1);
     }

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -68,15 +68,16 @@ public:
   }
 
   void initialize() override {
-    this->is_initialized(true);
+    this->setf(abstract_actor::is_initialized_flag);
     auto bhvr = make_behavior();
-    CAF_LOG_DEBUG_IF(! bhvr, "make_behavior() did not return a behavior:"
+    CAF_LOG_DEBUG_IF(!bhvr, "make_behavior() did not return a behavior:"
                              << CAF_ARG(this->has_behavior()));
     if (bhvr) {
       // make_behavior() did return a behavior instead of using become()
       CAF_LOG_DEBUG("make_behavior() did return a valid behavior");
       this->do_become(std::move(bhvr.unbox()), true);
     }
+    super::initialize();
   }
 
 protected:

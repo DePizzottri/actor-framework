@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,6 +19,7 @@
 
 #include "caf/actor.hpp"
 
+#include <cassert>
 #include <utility>
 
 #include "caf/actor_addr.hpp"
@@ -30,7 +31,6 @@
 #include "caf/scoped_actor.hpp"
 #include "caf/event_based_actor.hpp"
 
-#include "caf/decorator/adapter.hpp"
 #include "caf/decorator/splitter.hpp"
 #include "caf/decorator/sequencer.hpp"
 
@@ -62,7 +62,7 @@ intptr_t actor::compare(const actor& x) const noexcept {
 }
 
 intptr_t actor::compare(const actor_addr& x) const noexcept {
-  return actor_addr::compare(ptr_.get(), x.ptr_.get());
+  return actor_addr::compare(ptr_.get(), actor_cast<actor_control_block*>(x));
 }
 
 intptr_t actor::compare(const strong_actor_ptr& x) const noexcept {
@@ -77,12 +77,6 @@ actor_addr actor::address() const noexcept {
   return actor_cast<actor_addr>(ptr_);
 }
 
-actor actor::bind_impl(message msg) const {
-  auto& sys = *(ptr_->home_system);
-  return make_actor<decorator::adapter, actor>(sys.next_actor_id(), sys.node(),
-                                               &sys, ptr_, std::move(msg));
-}
-
 actor operator*(actor f, actor g) {
   auto& sys = f->home_system();
   return make_actor<decorator::sequencer, actor>(
@@ -92,11 +86,11 @@ actor operator*(actor f, actor g) {
 }
 
 actor actor::splice_impl(std::initializer_list<actor> xs) {
-  CAF_ASSERT(xs.size() >= 2);
+  assert(xs.size() >= 2);
   actor_system* sys = nullptr;
   std::vector<strong_actor_ptr> tmp;
   for (auto& x : xs) {
-    if (! sys)
+    if (sys == nullptr)
       sys = &(x->home_system());
     tmp.push_back(actor_cast<strong_actor_ptr>(x));
   }

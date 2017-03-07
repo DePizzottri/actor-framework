@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,34 +17,33 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_DISABLABLE_DELETE_HPP
-#define CAF_DETAIL_DISABLABLE_DELETE_HPP
+#ifndef CAF_META_SAVE_CALLBACK_HPP
+#define CAF_META_SAVE_CALLBACK_HPP
+
+#include "caf/meta/annotation.hpp"
 
 namespace caf {
-namespace detail {
+namespace meta {
 
-class disablable_delete {
-
-public:
-
-  constexpr disablable_delete() : enabled_(true) {}
-
-  inline void disable() { enabled_ = false; }
-
-  inline void enable() { enabled_ = true; }
-
-  template <class T>
-  inline void operator()(T* ptr) {
-    if (enabled_) delete ptr;
+template <class F>
+struct save_callback_t : annotation {
+  save_callback_t(F&& f) : fun(f) {
+    // nop
   }
 
-private:
+  save_callback_t(save_callback_t&&) = default;
 
-  bool enabled_;
-
+  F fun;
 };
 
-} // namespace detail
+/// Returns an annotation that allows inspectors to call
+/// user-defined code after performing save operations.
+template <class F>
+save_callback_t<F> save_callback(F fun) {
+  return {std::move(fun)};
+}
+
+} // namespace meta
 } // namespace caf
 
-#endif // CAF_DETAIL_DISABLABLE_DELETE_HPP
+#endif // CAF_META_SAVE_CALLBACK_HPP

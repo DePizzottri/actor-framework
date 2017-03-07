@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -16,6 +16,8 @@
  * http://opensource.org/licenses/BSD-3-Clause and                            *
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
+
+#include <utility>
 
 #include "caf/detail/behavior_impl.hpp"
 
@@ -45,9 +47,9 @@ public:
     return new combinator(first, second->copy(tdef));
   }
 
-  combinator(const pointer& p0, const pointer& p1)
+  combinator(pointer p0, const pointer& p1)
       : behavior_impl(p1->timeout()),
-        first(p0),
+        first(std::move(p0)),
         second(p1) {
     // nop
   }
@@ -117,7 +119,7 @@ optional<message> behavior_impl::invoke(message& xs) {
   maybe_message_visitor f;
   // the following const-cast is safe, because invoke() is aware of
   // copy-on-write and does not modify x if it's shared
-  if (! xs.empty())
+  if (!xs.empty())
     invoke(f, *const_cast<message_data*>(xs.cvals().get()));
   else
     invoke_empty(f);
@@ -134,7 +136,7 @@ match_case::result behavior_impl::invoke(detail::invoke_result_visitor& f,
                                          message& xs) {
   // the following const-cast is safe, because invoke() is aware of
   // copy-on-write and does not modify x if it's shared
-  if (! xs.empty())
+  if (!xs.empty())
     return invoke(f, *const_cast<message_data*>(xs.cvals().get()));
   return invoke_empty(f);
 }

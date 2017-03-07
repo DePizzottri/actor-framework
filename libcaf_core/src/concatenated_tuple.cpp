@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -31,7 +31,7 @@ concatenated_tuple::concatenated_tuple(std::initializer_list<cow_ptr> xs) {
   for (auto& x : xs) {
     if (x) {
       auto dptr = dynamic_cast<const concatenated_tuple*>(x.get());
-      if (dptr) {
+      if (dptr != nullptr) {
         auto& vec = dptr->data_;
         data_.insert(data_.end(), vec.begin(), vec.end());
       } else {
@@ -66,9 +66,7 @@ void* concatenated_tuple::get_mutable(size_t pos) {
 error concatenated_tuple::load(size_t pos, deserializer& source) {
   CAF_ASSERT(pos < size());
   auto selected = select(pos);
-  selected.first->load(selected.second, source);
-  // TODO: refactor after visit API is in place (#470)
-  return {};
+  return selected.first->load(selected.second, source);
 }
 
 size_t concatenated_tuple::size() const noexcept {
@@ -106,9 +104,7 @@ type_erased_value_ptr concatenated_tuple::copy(size_t pos) const {
 error concatenated_tuple::save(size_t pos, serializer& sink) const {
   CAF_ASSERT(pos < size());
   auto selected = select(pos);
-  selected.first->save(selected.second, sink);
-  // TODO: refactor after visit API is in place (#470)
-  return {};
+  return selected.first->save(selected.second, sink);
 }
 
 std::pair<message_data*, size_t> concatenated_tuple::select(size_t pos) const {

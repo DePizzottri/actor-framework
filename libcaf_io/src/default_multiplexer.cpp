@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -38,7 +38,7 @@
 # include <windows.h>
 # include <io.h>
 #else
-# include <errno.h>
+# include <cerrno>
 # include <netdb.h>
 # include <fcntl.h>
 # include <sys/types.h>
@@ -46,6 +46,8 @@
 # include <sys/socket.h>
 # include <netinet/in.h>
 # include <netinet/tcp.h>
+
+#include <utility>
 #endif
 
 using std::string;
@@ -87,7 +89,7 @@ bool cc_valid_socket(caf::io::network::native_socket fd) {
 // calls a C functions and returns an error if `predicate(var)`  returns false
 #define CALL_CFUN(var, predicate, fun_name, expr)                              \
   auto var = expr;                                                             \
-  if (! predicate(var))                                                        \
+  if (!predicate(var))                                                        \
     return make_error(sec::network_syscall_failed,                             \
                       fun_name, last_socket_error_as_string())
 
@@ -95,7 +97,7 @@ bool cc_valid_socket(caf::io::network::native_socket fd) {
 #ifdef CAF_WINDOWS
 #define CALL_CRITICAL_CFUN(var, predicate, funname, expr)                      \
   auto var = expr;                                                             \
-  if (! predicate(var)) {                                                      \
+  if (!predicate(var)) {                                                      \
     fprintf(stderr, "[FATAL] %s:%u: syscall failed: %s returned %s\n",         \
            __FILE__, __LINE__, funname, last_socket_error_as_string().c_str());\
     abort();                                                                   \
@@ -135,7 +137,7 @@ expected<uint16_t> remote_port_of_fd(native_socket fd);
   }
 
   expected<void> allow_sigpipe(native_socket fd, bool new_value) {
-#   ifndef CAF_LINUX
+#   if !defined(CAF_LINUX) && !defined(CAF_CYGWIN)
     int value = new_value ? 0 : 1;
     CALL_CFUN(res, cc_zero, "setsockopt",
               setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &value,
@@ -456,7 +458,7 @@ expected<uint16_t> remote_port_of_fd(native_socket fd);
       event_handler* ptr;     // nullptr in case of a pipe event
     };
     std::vector<fd_event> poll_res;
-    while (! pollset_.empty()) {
+    while (!pollset_.empty()) {
       int presult;
       CAF_LOG_DEBUG(CAF_ARG(pollset_.size()));
 #     ifdef CAF_WINDOWS
@@ -530,7 +532,7 @@ expected<uint16_t> remote_port_of_fd(native_socket fd);
     new_element.events = static_cast<short>(e.mask);
     new_element.revents = 0;
     int old_mask = 0;
-    if (e.ptr) {
+    if (e.ptr != nullptr) {
       old_mask = e.ptr->eventbf();
       e.ptr->eventbf(e.mask);
     }
@@ -558,9 +560,9 @@ expected<uint16_t> remote_port_of_fd(native_socket fd);
         CAF_ASSERT(*j == e.ptr);
         i->events = static_cast<short>(e.mask);
       }
-      if (e.ptr) {
+      if (e.ptr != nullptr) {
         auto remove_from_loop_if_needed = [&](int flag, operation flag_op) {
-          if ((old_mask & flag) && !(e.mask & flag)) {
+          if (((old_mask & flag) != 0) && ((e.mask & flag) == 0)) {
             e.ptr->removed_from_loop(flag_op);
           }
         };
@@ -647,7 +649,7 @@ multiplexer::supervisor_ptr default_multiplexer::make_supervisor() {
     explicit impl(default_multiplexer* thisptr) : this_(thisptr) {
       // nop
     }
-    ~impl() {
+    ~impl() override {
       auto ptr = this_;
       ptr->dispatch([=] { ptr->close_pipe(); });
     }
@@ -667,18 +669,18 @@ void default_multiplexer::handle_socket_event(native_socket fd, int mask,
   CAF_LOG_TRACE(CAF_ARG(fd) << CAF_ARG(mask));
   CAF_ASSERT(ptr != nullptr);
   bool checkerror = true;
-  if (mask & input_mask) {
+  if ((mask & input_mask) != 0) {
     checkerror = false;
     // ignore read events if a previous event caused
     // this socket to be shut down for reading
-    if (! ptr->read_channel_closed())
+    if (!ptr->read_channel_closed())
       ptr->handle_event(operation::read);
   }
-  if (mask & output_mask) {
+  if ((mask & output_mask) != 0) {
     checkerror = false;
     ptr->handle_event(operation::write);
   }
-  if (checkerror && (mask & error_mask)) {
+  if (checkerror && ((mask & error_mask) != 0)) {
     CAF_LOG_DEBUG("error occured on socket:"
                   << CAF_ARG(fd) << CAF_ARG(last_socket_error())
                   << CAF_ARG(last_socket_error_as_string()));
@@ -705,7 +707,7 @@ default_multiplexer::~default_multiplexer() {
   // flush pipe before closing it
   nonblocking(pipe_.first, true);
   auto ptr = pipe_reader_.try_read_next();
-  while (ptr) {
+  while (ptr != nullptr) {
     scheduler::abstract_coordinator::cleanup_and_release(ptr);
     ptr = pipe_reader_.try_read_next();
   }
@@ -743,7 +745,7 @@ connection_handle default_multiplexer::add_tcp_scribe(abstract_broker* self,
     void configure_read(receive_policy::config config) override {
       CAF_LOG_TRACE("");
       stream_.configure_read(config);
-      if (! launched_)
+      if (!launched_)
         launch();
     }
     void ack_writes(bool enable) override {
@@ -767,21 +769,27 @@ connection_handle default_multiplexer::add_tcp_scribe(abstract_broker* self,
     }
     std::string addr() const override {
       auto x = remote_addr_of_fd(stream_.fd());
-      if (! x)
+      if (!x)
         return "";
       return *x;
     }
     uint16_t port() const override {
       auto x = remote_port_of_fd(stream_.fd());
-      if (! x)
+      if (!x)
         return 0;
       return *x;
     }
     void launch() {
       CAF_LOG_TRACE("");
-      CAF_ASSERT(! launched_);
+      CAF_ASSERT(!launched_);
       launched_ = true;
       stream_.start(this);
+    }
+    void add_to_loop() override {
+      stream_.activate(this);
+    }
+    void remove_from_loop() override {
+      stream_.passivate();
     }
  private:
     bool launched_;
@@ -803,12 +811,18 @@ accept_handle default_multiplexer::add_tcp_doorman(abstract_broker* self,
           acceptor_(mx, sockfd) {
       // nop
     }
-    void new_connection() override {
+    bool new_connection() override {
       CAF_LOG_TRACE("");
+      if (detached())
+         // we are already disconnected from the broker while the multiplexer
+         // did not yet remove the socket, this can happen if an I/O event causes
+         // the broker to call close_all() while the pollset contained
+         // further activities for the broker
+         return false;
       auto& dm = acceptor_.backend();
-      msg().handle
-        = dm.add_tcp_scribe(parent(), std::move(acceptor_.accepted_socket()));
-      invoke_mailbox_element(&acceptor_.backend());
+      auto hdl = dm.add_tcp_scribe(parent(),
+                                   std::move(acceptor_.accepted_socket()));
+      return doorman::new_connection(&dm, hdl);
     }
     void stop_reading() override {
       CAF_LOG_TRACE("");
@@ -821,15 +835,21 @@ accept_handle default_multiplexer::add_tcp_doorman(abstract_broker* self,
     }
     std::string addr() const override {
       auto x = local_addr_of_fd(acceptor_.fd());
-      if (! x)
+      if (!x)
         return "";
       return std::move(*x);
     }
     uint16_t port() const override {
       auto x = local_port_of_fd(acceptor_.fd());
-      if (! x)
+      if (!x)
         return 0;
       return *x;
+    }
+    void add_to_loop() override {
+      acceptor_.activate(this);
+    }
+    void remove_from_loop() override {
+      acceptor_.passivate();
     }
  private:
     network::acceptor acceptor_;
@@ -842,7 +862,7 @@ accept_handle default_multiplexer::add_tcp_doorman(abstract_broker* self,
 expected<connection_handle>
 default_multiplexer::new_tcp_scribe(const std::string& host, uint16_t port) {
   auto fd = new_tcp_connection(host, port);
-  if (! fd)
+  if (!fd)
     return std::move(fd.error());
   return connection_handle::from_int(int64_from_native_socket(*fd));
 }
@@ -859,7 +879,7 @@ default_multiplexer::add_tcp_scribe(abstract_broker* self,
                                     const std::string& host, uint16_t port) {
   CAF_LOG_TRACE(CAF_ARG(self->id()) << CAF_ARG(host) << CAF_ARG(port));
   auto fd = new_tcp_connection(host, port);
-  if (! fd)
+  if (!fd)
     return std::move(fd.error());
   return add_tcp_scribe(self, *fd);
 }
@@ -868,7 +888,7 @@ expected<std::pair<accept_handle, uint16_t>>
 default_multiplexer::new_tcp_doorman(uint16_t port, const char* in,
                                      bool reuse_addr) {
   auto res = new_tcp_acceptor_impl(port, in, reuse_addr);
-  if (! res)
+  if (!res)
     return std::move(res.error());
   return std::make_pair(accept_handle::from_int(int64_from_native_socket(res->first)),
                         res->second);
@@ -884,7 +904,7 @@ expected<std::pair<accept_handle, uint16_t>>
 default_multiplexer::add_tcp_doorman(abstract_broker* self, uint16_t port,
                                      const char* host, bool reuse_addr) {
   auto acceptor = new_tcp_acceptor_impl(port, host, reuse_addr);
-  if (! acceptor)
+  if (!acceptor)
     return std::move(acceptor.error());
   auto bound_port = acceptor->second;
   return std::make_pair(add_tcp_doorman(self, acceptor->first), bound_port);
@@ -907,7 +927,7 @@ expected<void> tcp_nodelay(native_socket fd, bool new_value) {
 bool is_error(ssize_t res, bool is_nonblock) {
   if (res < 0) {
     auto err = last_socket_error();
-    if (! is_nonblock || ! would_block_or_temporarily_unavailable(err)) {
+    if (!is_nonblock || !would_block_or_temporarily_unavailable(err)) {
       return true;
     }
     // don't report an error in case of
@@ -948,7 +968,7 @@ bool try_accept(native_socket& result, native_socket fd) {
   CAF_LOG_DEBUG(CAF_ARG(fd) << CAF_ARG(result));
   if (result == invalid_native_socket) {
     auto err = last_socket_error();
-    if (! would_block_or_temporarily_unavailable(err)) {
+    if (!would_block_or_temporarily_unavailable(err)) {
       return false;
     }
   }
@@ -960,7 +980,6 @@ event_handler::event_handler(default_multiplexer& dm, native_socket sockfd)
       fd_(sockfd),
       read_channel_closed_(false),
       backend_(dm) {
-  CAF_LOG_TRACE(CAF_ARG(sockfd));
   set_fd_flags();
 }
 
@@ -974,6 +993,14 @@ void event_handler::close_read_channel() {
     return;
   ::shutdown(fd_, 0); // 0 identifies the read channel on Win & UNIX
   read_channel_closed_ = true;
+}
+
+void event_handler::passivate() {
+  backend().del(operation::read, fd(), this);
+}
+
+void event_handler::activate() {
+  backend().add(operation::read, fd(), this);
 }
 
 void event_handler::set_fd_flags() {
@@ -1047,11 +1074,17 @@ stream::stream(default_multiplexer& backend_ref, native_socket sockfd)
   configure_read(receive_policy::at_most(1024));
 }
 
-void stream::start(const manager_ptr& mgr) {
+void stream::start(stream_manager* mgr) {
   CAF_ASSERT(mgr != nullptr);
-  reader_ = mgr;
-  backend().add(operation::read, fd(), this);
-  prepare_next_read();
+  activate(mgr);
+}
+
+void stream::activate(stream_manager* mgr) {
+  if (!reader_) {
+    reader_.reset(mgr);
+    event_handler::activate();
+    prepare_next_read();
+  }
 }
 
 void stream::configure_read(receive_policy::config config) {
@@ -1073,7 +1106,7 @@ void stream::write(const void* buf, size_t num_bytes) {
 void stream::flush(const manager_ptr& mgr) {
   CAF_ASSERT(mgr != nullptr);
   CAF_LOG_TRACE(CAF_ARG(wr_offline_buf_.size()));
-  if (! wr_offline_buf_.empty() && ! writing_) {
+  if (!wr_offline_buf_.empty() && !writing_) {
     backend().add(operation::write, fd(), this);
     writer_ = mgr;
     writing_ = true;
@@ -1084,7 +1117,7 @@ void stream::flush(const manager_ptr& mgr) {
 void stream::stop_reading() {
   CAF_LOG_TRACE("");
   close_read_channel();
-  backend().del(operation::read, fd(), this);
+  passivate();
 }
 
 void stream::removed_from_loop(operation op) {
@@ -1104,26 +1137,30 @@ void stream::handle_event(operation op) {
       // or until we have handled 50 reads
       size_t rb;
       for (size_t i = 0; i < mcr; ++i) {
-        if (! read_some(rb, fd(),
+        if (!read_some(rb, fd(),
                         rd_buf_.data() + collected_,
                         rd_buf_.size() - collected_)) {
           reader_->io_failure(&backend(), operation::read);
-          backend().del(operation::read, fd(), this);
+          passivate();
           return;
         }
         if (rb == 0)
           return;
         collected_ += rb;
         if (collected_ >= read_threshold_) {
-          reader_->consume(&backend(), rd_buf_.data(), collected_);
+          auto res = reader_->consume(&backend(), rd_buf_.data(), collected_);
           prepare_next_read();
+          if (!res) {
+            passivate();
+            return;
+          }
         }
       }
       break;
     }
     case operation::write: {
       size_t wb; // written bytes
-      if (! write_some(wb, fd(),
+      if (!write_some(wb, fd(),
                        wr_buf_.data() + written_,
                        wr_buf_.size() - written_)) {
         writer_->io_failure(&backend(), operation::write);
@@ -1194,17 +1231,23 @@ acceptor::acceptor(default_multiplexer& backend_ref, native_socket sockfd)
   // nop
 }
 
-void acceptor::start(const manager_ptr& mgr) {
+void acceptor::start(acceptor_manager* mgr) {
   CAF_LOG_TRACE(CAF_ARG(fd()));
   CAF_ASSERT(mgr != nullptr);
-  mgr_ = mgr;
-  backend().add(operation::read, fd(), this);
+  activate(mgr);
+}
+
+void acceptor::activate(acceptor_manager* mgr) {
+  if (!mgr_) {
+    mgr_.reset(mgr);
+    event_handler::activate();
+  }
 }
 
 void acceptor::stop_reading() {
   CAF_LOG_TRACE(CAF_ARG(fd()));
   close_read_channel();
-  backend().del(operation::read, fd(), this);
+  passivate();
 }
 
 void acceptor::handle_event(operation op) {
@@ -1253,36 +1296,31 @@ private:
   native_socket fd_;
 };
 
-#ifdef CAF_WINDOWS
-using sa_family_t = unsigned short;
-using in_port_t = unsigned short;
-#endif
-
-in_addr& addr_of(sockaddr_in& what) {
+auto addr_of(sockaddr_in& what) -> decltype(what.sin_addr)& {
   return what.sin_addr;
 }
 
-sa_family_t& family_of(sockaddr_in& what) {
+auto family_of(sockaddr_in& what) -> decltype(what.sin_family)& {
   return what.sin_family;
 }
 
-in_port_t& port_of(sockaddr_in& what) {
+auto port_of(sockaddr_in& what) -> decltype(what.sin_port)& {
   return what.sin_port;
 }
 
-in6_addr& addr_of(sockaddr_in6& what) {
+auto addr_of(sockaddr_in6& what) -> decltype(what.sin6_addr)& {
   return what.sin6_addr;
 }
 
-sa_family_t& family_of(sockaddr_in6& what) {
+auto family_of(sockaddr_in6& what) -> decltype(what.sin6_family)& {
   return what.sin6_family;
 }
 
-in_port_t& port_of(sockaddr_in6& what) {
+auto port_of(sockaddr_in6& what) -> decltype(what.sin6_port)& {
   return what.sin6_port;
 }
 
-in_port_t& port_of(sockaddr& what) {
+auto port_of(sockaddr& what) -> decltype(port_of(std::declval<sockaddr_in&>())) {
   switch (what.sa_family) {
     case AF_INET:
       return port_of(reinterpret_cast<sockaddr_in&>(what));
@@ -1318,8 +1356,8 @@ expected<native_socket> new_tcp_connection(const std::string& host,
                                            optional<protocol> preferred) {
   CAF_LOG_TRACE(CAF_ARG(host) << CAF_ARG(port) << CAF_ARG(preferred));
   CAF_LOG_INFO("try to connect to:" << CAF_ARG(host) << CAF_ARG(port));
-  auto res = interfaces::native_address(host, preferred);
-  if (! res) {
+  auto res = interfaces::native_address(host, std::move(preferred));
+  if (!res) {
     CAF_LOG_INFO("no such host");
     return make_error(sec::cannot_connect_to_node, "no such host", host, port);
   }
@@ -1337,7 +1375,7 @@ expected<native_socket> new_tcp_connection(const std::string& host,
     // IPv4 fallback
     return new_tcp_connection(host, port, ipv4);
   }
-  if (! ip_connect<AF_INET>(fd, res->first, port)) {
+  if (!ip_connect<AF_INET>(fd, res->first, port)) {
     CAF_LOG_INFO("could not connect to:" << CAF_ARG(host) << CAF_ARG(port));
     return make_error(sec::cannot_connect_to_node,
                       "ip_connect failed", host, port);
@@ -1384,7 +1422,7 @@ expected<uint16_t> new_ip_acceptor_impl(native_socket fd, uint16_t port,
   sockaddr_type sa;
   memset(&sa, 0, sizeof(sockaddr_type));
   family_of(sa) = Family;
-  if (! addr) {
+  if (!addr) {
     set_inaddr_any(fd, sa);
   } else {
     CALL_CFUN(res, cc_one, "inet_pton",
@@ -1402,9 +1440,9 @@ expected<std::pair<native_socket, uint16_t>>
 new_tcp_acceptor_impl(uint16_t port, const char* addr, bool reuse_addr) {
   CAF_LOG_TRACE(CAF_ARG(port) << ", addr = " << (addr ? addr : "nullptr"));
   protocol proto = ipv6;
-  if (addr) {
+  if (addr != nullptr) {
     auto addrs = interfaces::native_address(addr);
-    if (! addrs)
+    if (!addrs)
       return make_error(sec::cannot_open_port, "Invalid ADDR", addr);
     proto = addrs->second;
     CAF_ASSERT(proto == ipv4 || proto == ipv6);
@@ -1422,7 +1460,7 @@ new_tcp_acceptor_impl(uint16_t port, const char* addr, bool reuse_addr) {
   }
   auto p = proto == ipv4 ? new_ip_acceptor_impl<AF_INET>(fd, port, addr)
                          : new_ip_acceptor_impl<AF_INET6>(fd, port, addr);
-  if (! p)
+  if (!p)
     return std::move(p.error());
   CALL_CFUN(tmp2, cc_zero, "listen", listen(fd, SOMAXCONN));
   // ok, no errors so far

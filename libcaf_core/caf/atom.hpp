@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -35,7 +35,10 @@ enum class atom_value : uint64_t {
   /// @endcond
 };
 
-std::string to_string(const atom_value& x);
+/// @relates atom_value
+std::string to_string(const atom_value& what);
+
+atom_value atom_from_string(const std::string& x);
 
 /// Creates an atom from given string literal.
 template <size_t Size>
@@ -151,6 +154,24 @@ using migrate_atom = atom_constant<atom("migrate")>;
 
 /// Used for triggering periodic operations.
 using tick_atom = atom_constant<atom("tick")>;
+
+/// Used as config parameter for the `logger`.
+using trace_log_lvl_atom = atom_constant<atom("TRACE")>;
+
+/// Used as config parameter for the `logger`.
+using debug_log_lvl_atom = atom_constant<atom("DEBUG")>;
+
+/// Used as config parameter for the `logger`.
+using info_log_lvl_atom = atom_constant<atom("INFO")>;
+
+/// Used as config parameter for the `logger`.
+using warning_log_lvl_atom = atom_constant<atom("WARNING")>;
+
+/// Used as config parameter for the `logger`.
+using error_log_lvl_atom = atom_constant<atom("ERROR")>;
+
+/// Used as config parameter for the `logger`.
+using quiet_log_lvl_atom = atom_constant<atom("QUIET")>;
 
 } // namespace caf
 

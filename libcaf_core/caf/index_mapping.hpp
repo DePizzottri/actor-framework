@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -24,7 +24,7 @@
 #include <string>
 #include <functional>
 
-#include "caf/deep_to_string.hpp"
+#include "caf/meta/type_name.hpp"
 
 namespace caf {
 
@@ -49,13 +49,9 @@ inline bool operator==(const index_mapping& x, const index_mapping& y) {
   return x.value == y.value;
 }
 
-template <class Processor>
-void serialize(Processor& proc, index_mapping& x, const unsigned int) {
-  proc & x.value;
-}
-
-inline std::string to_string(const index_mapping& x) {
-  return "idx" + deep_to_string_as_tuple(x.value);
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, index_mapping& x) {
+  return f(meta::type_name("index_mapping"), x.value);
 }
 
 } // namespace caf

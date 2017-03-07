@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -78,9 +78,7 @@ public:
   }
 
   error load(deserializer& source) override {
-    detail::try_serialize(source, addr_of(x_));
-    // TODO: refactor after visit API is in place (#470)
-    return {};
+    return source(*addr_of(x_));
   }
 
   // -- overridden observers ---------------------------------------------------
@@ -105,9 +103,7 @@ public:
   }
 
   error save(serializer& sink) const override {
-    detail::try_serialize(sink, addr_of(x_));
-    // TODO: refactor after visit API is in place (#470)
-    return {};
+    return sink(*addr_of(const_cast<T&>(x_)));
   }
 
   std::string stringify() const override {

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -46,6 +46,7 @@
 #include "caf/typed_actor.hpp"
 #include "caf/actor_config.hpp"
 #include "caf/actor_system.hpp"
+#include "caf/response_type.hpp"
 #include "caf/spawn_options.hpp"
 #include "caf/abstract_actor.hpp"
 #include "caf/abstract_group.hpp"
@@ -98,9 +99,9 @@ public:
 
   // -- constructors, destructors, and assignment operators --------------------
 
-  local_actor(actor_config& sys);
+  local_actor(actor_config& cfg);
 
-  ~local_actor();
+  ~local_actor() override;
 
   void on_destroy() override;
 
@@ -112,20 +113,25 @@ public:
 
   /// Requests a new timeout for `mid`.
   /// @pre `mid.valid()`
-  void request_response_timeout(const duration& dr, message_id mid);
+  void request_response_timeout(const duration& d, message_id mid);
 
   // -- spawn functions --------------------------------------------------------
 
   template <class T, spawn_options Os = no_spawn_options, class... Ts>
-  typename infer_handle_from_class<T>::type
-  spawn(Ts&&... xs) {
+  infer_handle_from_class_t<T> spawn(Ts&&... xs) {
     actor_config cfg{context()};
     return eval_opts(Os, system().spawn_class<T, make_unbound(Os)>(cfg, std::forward<Ts>(xs)...));
   }
 
+  template <class T, spawn_options Os = no_spawn_options>
+  infer_handle_from_state_t<T> spawn() {
+    using impl = composable_behavior_based_actor<T>;
+    actor_config cfg{context()};
+    return eval_opts(Os, system().spawn_class<impl, make_unbound(Os)>(cfg));
+  }
+
   template <spawn_options Os = no_spawn_options, class F, class... Ts>
-  typename infer_handle_from_fun<F>::type
-  spawn(F fun, Ts&&... xs) {
+  infer_handle_from_fun_t<F> spawn(F fun, Ts&&... xs) {
     actor_config cfg{context()};
     return eval_opts(Os, system().spawn_functor<make_unbound(Os)>(cfg, fun, std::forward<Ts>(xs)...));
   }
@@ -134,52 +140,52 @@ public:
             class... Ts>
   actor spawn_in_groups(const Groups& gs, Ts&&... xs) {
     actor_config cfg{context()};
-    return eval_opts(Os, system().spawn_in_groups_impl<T, make_unbound(Os)>(cfg, gs.begin(), gs.end(), std::forward<Ts>(xs)...));
+    return eval_opts(Os, system().spawn_class_in_groups<T, make_unbound(Os)>(cfg, gs.begin(), gs.end(), std::forward<Ts>(xs)...));
   }
 
   template <class T, spawn_options Os = no_spawn_options, class... Ts>
   actor spawn_in_groups(std::initializer_list<group> gs, Ts&&... xs) {
     actor_config cfg{context()};
-    return eval_opts(Os, system().spawn_in_groups_impl<T, make_unbound(Os)>(cfg, gs.begin(), gs.end(), std::forward<Ts>(xs)...));
+    return eval_opts(Os, system().spawn_class_in_groups<T, make_unbound(Os)>(cfg, gs.begin(), gs.end(), std::forward<Ts>(xs)...));
   }
 
   template <class T, spawn_options Os = no_spawn_options, class... Ts>
   actor spawn_in_group(const group& grp, Ts&&... xs) {
     actor_config cfg{context()};
     auto first = &grp;
-    return eval_opts(Os, system().spawn_in_groups_impl<T, make_unbound(Os)>(cfg, first, first + 1, std::forward<Ts>(xs)...));
+    return eval_opts(Os, system().spawn_class_in_groups<T, make_unbound(Os)>(cfg, first, first + 1, std::forward<Ts>(xs)...));
   }
 
   template <spawn_options Os = no_spawn_options, class Groups, class F, class... Ts>
   actor spawn_in_groups(const Groups& gs, F fun, Ts&&... xs) {
     actor_config cfg{context()};
-    return eval_opts(Os, system().spawn_in_groups_impl<make_unbound(Os)>(cfg, gs.begin(), gs.end(), fun, std::forward<Ts>(xs)...));
+    return eval_opts(Os, system().spawn_fun_in_groups<make_unbound(Os)>(cfg, gs.begin(), gs.end(), fun, std::forward<Ts>(xs)...));
   }
 
   template <spawn_options Os = no_spawn_options, class F, class... Ts>
   actor spawn_in_groups(std::initializer_list<group> gs, F fun, Ts&&... xs) {
     actor_config cfg{context()};
-    return eval_opts(Os, system().spawn_in_groups_impl<make_unbound(Os)>(cfg, gs.begin(), gs.end(), fun, std::forward<Ts>(xs)...));
+    return eval_opts(Os, system().spawn_fun_in_groups<make_unbound(Os)>(cfg, gs.begin(), gs.end(), fun, std::forward<Ts>(xs)...));
   }
 
   template <spawn_options Os = no_spawn_options, class F, class... Ts>
   actor spawn_in_group(const group& grp, F fun, Ts&&... xs) {
     actor_config cfg{context()};
     auto first = &grp;
-    return eval_opts(Os, system().spawn_in_groups_impl<make_unbound(Os)>(cfg, first, first + 1, fun, std::forward<Ts>(xs)...));
+    return eval_opts(Os, system().spawn_fun_in_groups<make_unbound(Os)>(cfg, first, first + 1, fun, std::forward<Ts>(xs)...));
   }
 
   // -- sending asynchronous messages ------------------------------------------
 
   /// Sends an exit message to `dest`.
-  void send_exit(const actor_addr& dest, error reason);
+  void send_exit(const actor_addr& whom, error reason);
 
   void send_exit(const strong_actor_ptr& dest, error reason);
 
   /// Sends an exit message to `dest`.
   template <class ActorHandle>
   void send_exit(const ActorHandle& dest, error reason) {
-    dest->eq_impl(message_id::make(), nullptr, context(),
+    dest->eq_impl(message_id::make(), ctrl(), context(),
                   exit_msg{address(), std::move(reason)});
   }
 
@@ -203,13 +209,20 @@ public:
 
   /// @cond PRIVATE
 
-  void monitor(abstract_actor* whom);
+  void monitor(abstract_actor* ptr);
 
   /// @endcond
 
   /// Returns a pointer to the sender of the current message.
-  inline strong_actor_ptr current_sender() {
-    return current_element_ ? current_element_->sender : nullptr;
+  /// @pre `current_mailbox_element() != nullptr`
+  inline strong_actor_ptr& current_sender() {
+    CAF_ASSERT(current_element_);
+    return current_element_->sender;
+  }
+
+  /// Returns a pointer to the currently processed mailbox element.
+  inline mailbox_element* current_mailbox_element() {
+    return current_element_;
   }
 
   /// Adds a unidirectional `monitor` to `whom`.
@@ -238,12 +251,12 @@ public:
   typename detail::make_response_promise_helper<Ts...>::type
   make_response_promise() {
     auto& ptr = current_element_;
-    if (! ptr)
+    if (!ptr)
       return {};
     auto& mid = ptr->mid;
     if (mid.is_answered())
       return {};
-    return {this, *ptr};
+    return {this->context(), this->ctrl(), *ptr};
   }
 
   /// Creates a `response_promise` to respond to a request later on.
@@ -270,12 +283,19 @@ public:
   /// Serializes the state of this actor to `sink`. This function is
   /// only called if this actor has set the `is_serializable` flag.
   /// The default implementation throws a `std::logic_error`.
-  virtual error save_state(serializer& sink, const unsigned int version);
+  virtual error save_state(serializer& sink, unsigned int version);
 
   /// Deserializes the state of this actor from `source`. This function is
   /// only called if this actor has set the `is_serializable` flag.
   /// The default implementation throws a `std::logic_error`.
-  virtual error load_state(deserializer& source, const unsigned int version);
+  virtual error load_state(deserializer& source, unsigned int version);
+
+  /// Returns the currently defined fail state. If this reason is not
+  /// `none` then the actor will terminate with this error after executing
+  /// the current message handler.
+  inline const error& fail_state() const {
+    return fail_state_;
+  }
 
   // -- here be dragons: end of public interface -------------------------------
 
@@ -299,13 +319,9 @@ public:
 
   template <message_priority P = message_priority::normal,
             class Handle = actor, class... Ts>
-  typename detail::deduce_output_type<
-    Handle,
-    detail::type_list<
-      typename detail::implicit_conversions<
-        typename std::decay<Ts>::type
-      >::type...
-    >
+  typename response_type<
+    typename Handle::signatures,
+    detail::implicit_conversions_t<typename std::decay<Ts>::type>...
   >::delegated_type
   delegate(const Handle& dest, Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "nothing to delegate");
@@ -314,9 +330,7 @@ public:
         typename detail::implicit_conversions<
           typename std::decay<Ts>::type
         >::type...>;
-    static_assert(actor_accepts_message<
-                    typename signatures_of<Handle>::type, token
-                  >::value,
+    static_assert(response_type_unbox<signatures_of_t<Handle>, token>::valid,
                   "receiver does not accept given message");
     auto mid = current_element_->mid;
     current_element_->mid = P == message_priority::high
@@ -335,7 +349,7 @@ public:
 
   virtual void initialize();
 
-  bool cleanup(error&& reason, execution_unit* host) override;
+  bool cleanup(error&& fail_state, execution_unit* host) override;
 
   message_id new_request_id(message_priority mp);
 
@@ -349,7 +363,7 @@ public:
   bool has_next_message();
 
   /// Appends `x` to the cache for later consumption.
-  void push_to_cache(mailbox_element_ptr x);
+  void push_to_cache(mailbox_element_ptr ptr);
 
 protected:
   // -- member variables -------------------------------------------------------
@@ -369,10 +383,6 @@ protected:
   /// Factory function for returning initial behavior in function-based actors.
   std::function<behavior (local_actor*)> initial_behavior_fac_;
 };
-
-/// A smart pointer to a {@link local_actor} instance.
-/// @relates local_actor
-using local_actor_ptr = intrusive_ptr<local_actor>;
 
 } // namespace caf
 

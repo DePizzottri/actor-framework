@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -23,12 +23,6 @@
 #include <utility>
 
 #include "caf/fwd.hpp"
-#include "caf/sec.hpp"
-#include "caf/message.hpp"
-
-#include "caf/detail/int_list.hpp"
-#include "caf/detail/apply_args.hpp"
-#include "caf/detail/pseudo_tuple.hpp"
 
 namespace caf {
 
@@ -37,7 +31,7 @@ class abstract_composable_behavior {
 public:
   virtual ~abstract_composable_behavior();
 
-  virtual void init_behavior(behavior& x) = 0;
+  virtual void init_behavior(message_handler& x) = 0;
 };
 
 } // namespace caf

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -33,10 +33,10 @@ class test_multiplexer : public multiplexer {
 public:
   explicit test_multiplexer(actor_system* sys);
 
-  ~test_multiplexer();
+  ~test_multiplexer() override;
 
   expected<connection_handle> new_tcp_scribe(const std::string& host,
-                                   uint16_t port) override;
+                                   uint16_t port_hint) override;
 
   expected<void> assign_tcp_scribe(abstract_broker* ptr,
                                    connection_handle hdl) override;
@@ -45,10 +45,10 @@ public:
 
   expected<connection_handle> add_tcp_scribe(abstract_broker* ptr,
                                              const std::string& host,
-                                             uint16_t port) override;
+                                             uint16_t desired_port) override;
 
   expected<std::pair<accept_handle, uint16_t>>
-  new_tcp_doorman(uint16_t port, const char*, bool) override;
+  new_tcp_doorman(uint16_t desired_port, const char*, bool) override;
 
   expected<void> assign_tcp_doorman(abstract_broker* ptr,
                                     accept_handle hdl) override;
@@ -63,9 +63,9 @@ public:
 
   void run() override;
 
-  void provide_scribe(std::string host, uint16_t port, connection_handle hdl);
+  void provide_scribe(std::string host, uint16_t desired_port, connection_handle hdl);
 
-  void provide_acceptor(uint16_t port, accept_handle hdl);
+  void provide_acceptor(uint16_t desired_port, accept_handle hdl);
 
   /// A buffer storing bytes.
   using buffer_type = std::vector<char>;
@@ -90,6 +90,9 @@ public:
   /// for reading, `false` otherwise.
   bool& stopped_reading(connection_handle hdl);
 
+  /// Returns `true` if this handle is inactive, otherwise `false`.
+  bool& passive_mode(connection_handle hdl);
+
   intrusive_ptr<scribe>& impl_ptr(connection_handle hdl);
 
   uint16_t& port(accept_handle hdl);
@@ -97,6 +100,9 @@ public:
   /// Returns `true` if this handle has been closed
   /// for reading, `false` otherwise.
   bool& stopped_reading(accept_handle hdl);
+
+  /// Returns `true` if this handle is inactive, otherwise `false`.
+  bool& passive_mode(accept_handle hdl);
 
   intrusive_ptr<doorman>& impl_ptr(accept_handle hdl);
 
@@ -111,10 +117,10 @@ public:
   using pending_scribes_map = std::map<std::pair<std::string, uint16_t>,
                                        connection_handle>;
 
-  bool has_pending_scribe(std::string host, uint16_t port);
+  bool has_pending_scribe(std::string x, uint16_t y);
 
   /// Accepts a pending connect on `hdl`.
-  void accept_connection(accept_handle hdl);
+  bool accept_connection(accept_handle hdl);
 
   /// Reads data from the external input buffer until
   /// the configured read policy no longer allows receiving.
@@ -149,6 +155,7 @@ private:
     buffer_type wr_buf;
     receive_policy::config recv_conf;
     bool stopped_reading = false;
+    bool passive_mode = false;
     intrusive_ptr<scribe> ptr;
     bool ack_writes = false;
   };
@@ -156,6 +163,7 @@ private:
   struct doorman_data {
     uint16_t port;
     bool stopped_reading = false;
+    bool passive_mode = false;
     intrusive_ptr<doorman> ptr;
   };
 

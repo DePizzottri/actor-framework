@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -27,11 +27,11 @@
 #include "caf/fwd.hpp"
 #include "caf/skip.hpp"
 #include "caf/atom.hpp"
+#include "caf/none.hpp"
 #include "caf/config.hpp"
 #include "caf/optional.hpp"
 #include "caf/make_counted.hpp"
 #include "caf/index_mapping.hpp"
-#include "caf/allowed_unsafe_message_type.hpp"
 
 #include "caf/detail/int_list.hpp"
 #include "caf/detail/apply_args.hpp"
@@ -67,12 +67,13 @@ public:
   // -- constructors, destructors, and assignment operators --------------------
 
   message() noexcept = default;
+  message(none_t) noexcept;
   message(const message&) noexcept = default;
   message& operator=(const message&) noexcept = default;
 
   message(message&&) noexcept;
   message& operator=(message&&) noexcept;
-  explicit message(const data_ptr& vals) noexcept;
+  explicit message(data_ptr  ptr) noexcept;
 
   ~message();
 
@@ -132,7 +133,7 @@ public:
   message drop_right(size_t n) const;
 
   /// Creates a new message of size `n` starting at the element at position `p`.
-  message slice(size_t p, size_t n) const;
+  message slice(size_t pos, size_t n) const;
 
   /// Filters this message by applying slices of it to `handler` and  returns
   /// the remaining elements of this operation. Slices are generated in the
@@ -197,16 +198,16 @@ public:
   /// }
   /// ~~~
   /// @param xs List of argument descriptors.
-  /// @param help_generator Optional factory function to generate help text
-  ///                       (overrides the default generator).
-  /// @param suppress_help Suppress generation of default-generated help option.
+  /// @param f Optional factory function to generate help text
+  ///          (overrides the default generator).
+  /// @param no_help Suppress generation of default-generated help option.
   /// @returns A struct containing remainder
   ///          (i.e. unmatched elements), a set containing the names of all
   ///          used arguments, and the generated help text.
   /// @throws std::invalid_argument if no name or more than one long name is set
   cli_res extract_opts(std::vector<cli_arg> xs,
-                       help_factory help_generator = nullptr,
-                       bool suppress_help = false) const;
+                       const help_factory& f = nullptr,
+                       bool no_help = false) const;
 
   // -- inline observers -------------------------------------------------------
 
@@ -266,16 +267,14 @@ public:
   /// Queries whether the element at position `p` is of type `T`.
   template <class T>
   bool match_element(size_t p) const noexcept {
-    auto rtti = type_nr<T>::value == 0 ? &typeid(T) : nullptr;
-    return match_element(p, type_nr<T>::value, rtti);
+    return vals_ ? vals_->match_element<T>(p) : false;
   }
 
   /// Queries whether the types of this message are `Ts...`.
   template <class... Ts>
   bool match_elements() const noexcept {
-    std::integral_constant<size_t, 0> p0;
-    detail::type_list<Ts...> tlist;
-    return size() == sizeof...(Ts) && match_elements_impl(p0, tlist);
+    detail::type_list<Ts...> token;
+    return match_elements(token);
   }
 
   /// Queries the run-time type information for the element at position `pos`.
@@ -293,11 +292,24 @@ public:
     return vals_->matches(pos, n, p);
   }
 
-  template <class T, class... Ts>
-  bool match_elements(detail::type_list<T, Ts...> list) const noexcept {
-    std::integral_constant<size_t, 0> p0;
-    return size() == (sizeof...(Ts) + 1) && match_elements_impl(p0, list);
+  inline bool match_elements(detail::type_list<>) const noexcept {
+    return !vals_ || vals_->empty();
   }
+
+  template <class T, class... Ts>
+  bool match_elements(detail::type_list<T, Ts...>) const noexcept {
+    return vals_ ? vals_->match_elements<T, Ts...>() : false;
+  }
+
+  /// @cond PRIVATE
+
+  /// @pre `!empty()`
+  type_erased_tuple& content() {
+    CAF_ASSERT(vals_);
+    return *vals_;
+  }
+
+  /// @endcond
 
 private:
   template <size_t P>
@@ -316,16 +328,16 @@ private:
 
   message extract_impl(size_t start, message_handler handler) const;
 
-  static message concat_impl(std::initializer_list<data_ptr> ptrs);
+  static message concat_impl(std::initializer_list<data_ptr> xs);
 
   data_ptr vals_;
 };
 
 /// @relates message
-void serialize(serializer& sink, const message& msg, const unsigned int);
+error inspect(serializer& sink, message& msg);
 
 /// @relates message
-void serialize(deserializer& sink, message& msg, const unsigned int);
+error inspect(deserializer& source, message& msg);
 
 /// @relates message
 std::string to_string(const message& msg);
@@ -352,23 +364,23 @@ struct message::cli_arg {
   bool* flag;
 
   /// Creates a CLI argument without data.
-  cli_arg(std::string name, std::string text);
+  cli_arg(std::string nstr, std::string tstr);
 
   /// Creates a CLI flag option. The `flag` is set to `true` if the option
   /// was set, otherwise it is `false`.
-  cli_arg(std::string name, std::string text, bool& flag);
+  cli_arg(std::string nstr, std::string tstr, bool& arg);
 
   /// Creates a CLI argument storing its matched argument in `dest`.
-  cli_arg(std::string name, std::string text, atom_value& dest);
+  cli_arg(std::string nstr, std::string tstr, atom_value& arg);
 
   /// Creates a CLI argument storing its matched argument in `dest`.
-  cli_arg(std::string name, std::string text, std::string& dest);
+  cli_arg(std::string nstr, std::string tstr, std::string& arg);
 
   /// Creates a CLI argument appending matched arguments to `dest`.
-  cli_arg(std::string name, std::string text, std::vector<std::string>& dest);
+  cli_arg(std::string nstr, std::string tstr, std::vector<std::string>& arg);
 
   /// Creates a CLI argument using the function object `f`.
-  cli_arg(std::string name, std::string text, consumer f);
+  cli_arg(std::string nstr, std::string tstr, consumer f);
 
   /// Creates a CLI argument for converting from strings,
   /// storing its matched argument in `dest`.

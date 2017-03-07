@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -107,18 +107,18 @@ public:
 
   /// Parses `args` as tuple of strings containing CLI options
   /// and `ini_stream` as INI formatted input stream.
-  actor_system_config& parse(message& args, std::istream& ini_stream);
+  actor_system_config& parse(message& args, std::istream& ini);
 
   /// Parses the CLI options `{argc, argv}` and
   /// `ini_stream` as INI formatted input stream.
-  actor_system_config& parse(int argc, char** argv, std::istream& ini_stream);
+  actor_system_config& parse(int argc, char** argv, std::istream& ini);
 
   /// Parses the CLI options `{argc, argv}` and
   /// tries to open `config_file_name` as INI formatted config file.
   /// The parsers tries to open `caf-application.ini` if `config_file_name`
   /// is `nullptr`.
   actor_system_config& parse(int argc, char** argv,
-                             const char* config_file_name = nullptr);
+                             const char* ini_file_cstr = nullptr);
 
   /// Allows other nodes to spawn actors created by `fun`
   /// dynamically by using `name` as identifier.
@@ -130,6 +130,9 @@ public:
   /// @experimental
   template <class T, class... Ts>
   actor_system_config& add_actor_type(std::string name) {
+    using handle = typename infer_handle_from_class<T>::type;
+    if (!std::is_same<handle, actor>::value)
+      add_message_type<handle>(name);
     return add_actor_factory(std::move(name), make_actor_factory<T, Ts...>());
   }
 
@@ -138,6 +141,9 @@ public:
   /// @experimental
   template <class F>
   actor_system_config& add_actor_type(std::string name, F f) {
+    using handle = typename infer_handle_from_fun<F>::type;
+    if (!std::is_same<handle, actor>::value)
+      add_message_type<handle>(name);
     return add_actor_factory(std::move(name), make_actor_factory(std::move(f)));
   }
 
@@ -145,6 +151,7 @@ public:
   template <class T>
   actor_system_config& add_message_type(std::string name) {
     static_assert(std::is_empty<T>::value
+                  || std::is_same<T, actor>::value // silence add_actor_type err
                   || is_typed_actor<T>::value
                   || (std::is_default_constructible<T>::value
                       && std::is_copy_constructible<T>::value),
@@ -159,8 +166,8 @@ public:
 
   /// Enables the actor system to convert errors of this error category
   /// to human-readable strings via `renderer`.
-  actor_system_config& add_error_category(atom_value category,
-                                          error_renderer renderer);
+  actor_system_config& add_error_category(atom_value x,
+                                          error_renderer y);
 
   /// Enables the actor system to convert errors of this error category
   /// to human-readable strings via `to_string(T)`.
@@ -171,7 +178,7 @@ public:
       result = to_string(category);
       result += ": ";
       result += to_string(static_cast<T>(val));
-      if (! ctx.empty()) {
+      if (!ctx.empty()) {
         result += " (";
         result += ctx;
         result += ")";
@@ -225,7 +232,7 @@ public:
   message args_remainder;
 
   /// Sets a config by using its INI name `config_name` to `config_value`.
-  actor_system_config& set(const char* config_name, config_value config_value);
+  actor_system_config& set(const char* cn, config_value cv);
 
   // -- config parameters of the scheduler -------------------------------------
   atom_value scheduler_policy;
@@ -244,6 +251,13 @@ public:
   size_t work_stealing_moderate_sleep_duration_us;
   size_t work_stealing_relaxed_steal_interval;
   size_t work_stealing_relaxed_sleep_duration_us;
+
+  // -- config parameters for the logger ---------------------------------------
+
+  std::string logger_filename;
+  atom_value logger_verbosity;
+  atom_value logger_console;
+  std::string logger_filter;
 
   // -- config parameters of the middleman -------------------------------------
 

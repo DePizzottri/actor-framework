@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -22,6 +22,7 @@
 #include <limits>
 #include <thread>
 #include <fstream>
+#include <sstream>
 
 #include "caf/message_builder.hpp"
 
@@ -35,7 +36,8 @@ using option_vector = actor_system_config::option_vector;
 
 class actor_system_config_reader {
 public:
-  using sink = std::function<void (size_t, config_value&)>;
+  using sink = std::function<void (size_t, config_value&,
+                                   optional<std::ostream&>)>;
 
   actor_system_config_reader(option_vector& xs, option_vector& ys) {
     add_opts(xs);
@@ -47,13 +49,13 @@ public:
       sinks_.emplace(x->full_name(), x->to_sink());
   }
 
-  void operator()(size_t ln, std::string name, config_value& cv) {
+  void operator()(size_t ln, const std::string& name, config_value& cv) {
     auto i = sinks_.find(name);
     if (i != sinks_.end())
-      (i->second)(ln, cv);
+      (i->second)(ln, cv, none);
     else
       std::cerr << "error in line " << ln
-                << ": unrecognized parameter name \"" << name << "\"";
+                << R"(: unrecognized parameter name ")" << name << R"(")";
   }
 
 private:
@@ -94,6 +96,8 @@ actor_system_config::actor_system_config()
   work_stealing_moderate_sleep_duration_us = 50;
   work_stealing_relaxed_steal_interval = 1;
   work_stealing_relaxed_sleep_duration_us = 10000;
+  logger_filename = "actor_log_[PID]_[TIMESTAMP]_[NODE].log";
+  logger_console = atom("NONE");
   middleman_network_backend = atom("default");
   middleman_enable_automatic_connections = false;
   middleman_max_consecutive_reads = 50;
@@ -127,6 +131,15 @@ actor_system_config::actor_system_config()
        "sets the frequency of steal attempts during relaxed polling")
   .add(work_stealing_relaxed_sleep_duration_us, "relaxed-sleep-duration",
        "sets the sleep interval between poll attempts during relaxed polling");
+  opt_group{options_, "logger"}
+  .add(logger_filename, "filename",
+       "sets the filesystem path of the log file")
+  .add(logger_verbosity, "verbosity",
+       "sets the verbosity (QUIET|ERROR|WARNING|INFO|DEBUG|TRACE)")
+  .add(logger_console, "console",
+       "enables logging to the console via std::clog")
+  .add(logger_filter, "filter",
+       "sets a component filter for console log messages");
   opt_group{options_, "middleman"}
   .add(middleman_network_backend, "network-backend",
        "sets the network backend to either 'default' or 'asio' (if available)")
@@ -187,7 +200,7 @@ actor_system_config& actor_system_config::parse(int argc, char** argv,
   if (argc > 1)
     args = message_builder(argv + 1, argv + argc).move_to_message();
   // set default config file name if not set by user
-  if (! ini_file_cstr)
+  if (ini_file_cstr == nullptr)
     ini_file_cstr = "caf-application.ini";
   std::string config_file_name;
   // CLI file name has priority over default file name
@@ -213,7 +226,8 @@ actor_system_config& actor_system_config::parse(message& args,
   // (2) content of the INI file overrides hard-coded defaults
   if (ini.good()) {
     actor_system_config_reader consumer{options_, custom_options_};
-    auto f = [&](size_t ln, std::string str, config_value& x) {
+    auto f = [&](size_t ln, std::string str,
+                 config_value& x, optional<std::ostream&>) {
       consumer(ln, std::move(str), x);
     };
     detail::parse_ini(ini, f, std::cerr);
@@ -239,17 +253,17 @@ actor_system_config& actor_system_config::parse(message& args,
   using std::cout;
   using std::endl;
   args_remainder = std::move(res.remainder);
-  if (! res.error.empty()) {
+  if (!res.error.empty()) {
     cli_helptext_printed = true;
     std::cerr << res.error << endl;
     return *this;
   }
-  if (res.opts.count("help")) {
+  if (res.opts.count("help") != 0u) {
     cli_helptext_printed = true;
     cout << res.helptext << endl;
     return *this;
   }
-  if (res.opts.count("caf#slave-mode")) {
+  if (res.opts.count("caf#slave-mode") != 0u) {
     slave_mode = true;
     if (slave_name.empty())
       std::cerr << "running in slave mode but no name was configured" << endl;
@@ -272,7 +286,7 @@ actor_system_config& actor_system_config::parse(message& args,
                   }, middleman_network_backend, "middleman.network-backend");
   verify_atom_opt({atom("stealing"), atom("sharing")},
                   scheduler_policy, "scheduler.policy ");
-  if (res.opts.count("caf#dump-config")) {
+  if (res.opts.count("caf#dump-config") != 0u) {
     cli_helptext_printed = true;
     std::string category;
     option_vector* all_options[] = { &options_, &custom_options_ };
@@ -302,30 +316,29 @@ actor_system_config::add_error_category(atom_value x, error_renderer y) {
 }
 
 actor_system_config& actor_system_config::set(const char* cn, config_value cv) {
-  std::string full_name;
-  for (auto& x : options_) {
-    // config_name has format "$category.$name"
-    full_name = x->category();
-    full_name += '.';
-    full_name += x->name();
-    if (full_name == cn) {
-      auto f = x->to_sink();
-      f(0, cv);
-    }
+  auto e = options_.end();
+  auto i = std::find_if(options_.begin(), e, [cn](const option_ptr& ptr) {
+    return ptr->full_name() == cn;
+  });
+  if (i != e) {
+    auto f = (*i)->to_sink();
+    f(0, cv, none);
   }
   return *this;
 }
 
 std::string actor_system_config::render_sec(uint8_t x, atom_value,
                                             const message& xs) {
-  return "system_error"
-         + (xs.empty() ? deep_to_string_as_tuple(static_cast<sec>(x))
-                       : deep_to_string_as_tuple(static_cast<sec>(x), xs));
+  auto tmp = static_cast<sec>(x);
+  return deep_to_string(meta::type_name("system_error"), tmp,
+                        meta::omittable_if_empty(), xs);
 }
 
 std::string actor_system_config::render_exit_reason(uint8_t x, atom_value,
-                                                    const message&) {
-  return "exit_reason" + deep_to_string_as_tuple(static_cast<exit_reason>(x));
+                                                    const message& xs) {
+  auto tmp = static_cast<exit_reason>(x);
+  return deep_to_string(meta::type_name("exit_reason"), tmp,
+                        meta::omittable_if_empty(), xs);
 }
 
 } // namespace caf

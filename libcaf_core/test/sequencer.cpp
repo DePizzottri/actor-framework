@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -67,7 +67,7 @@ struct fixture {
     auto ptr = actor_cast<abstract_actor*>(handle);
     auto dptr = dynamic_cast<monitorable_actor*>(ptr);
     CAF_REQUIRE(dptr != nullptr);
-    return dptr->is_terminated();
+    return dptr->getf(abstract_actor::is_terminated_flag);
   }
 
   actor_system_config cfg;

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -40,11 +40,15 @@ using doorman_base = broker_servant<network::acceptor_manager, accept_handle,
 /// @ingroup Broker
 class doorman : public doorman_base {
 public:
-  doorman(abstract_broker* parent, accept_handle hdl);
+  doorman(abstract_broker* ptr, accept_handle acc_hdl);
 
-  ~doorman();
+  ~doorman() override;
 
   void io_failure(execution_unit* ctx, network::operation op) override;
+
+  using doorman_base::new_connection;
+
+  bool new_connection(execution_unit* ctx, connection_handle x);
 
   // needs to be launched explicitly
   virtual void launch() = 0;

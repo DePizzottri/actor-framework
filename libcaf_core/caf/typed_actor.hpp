@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -26,19 +26,16 @@
 #include "caf/actor_cast.hpp"
 #include "caf/replies_to.hpp"
 #include "caf/actor_system.hpp"
+#include "caf/composed_type.hpp"
 #include "caf/abstract_actor.hpp"
 #include "caf/stateful_actor.hpp"
 #include "caf/typed_behavior.hpp"
 #include "caf/typed_response_promise.hpp"
 #include "caf/unsafe_actor_handle_init.hpp"
 
-#include "caf/decorator/adapter.hpp"
+#include "caf/detail/mpi_splice.hpp"
 #include "caf/decorator/splitter.hpp"
 #include "caf/decorator/sequencer.hpp"
-
-#include "caf/detail/mpi_bind.hpp"
-#include "caf/detail/mpi_splice.hpp"
-#include "caf/detail/mpi_sequencer.hpp"
 
 namespace caf {
 
@@ -80,9 +77,6 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
 
   // tell actor_cast which semantic this type uses
   static constexpr bool has_weak_ptr_semantics = false;
-
-  // tell actor_cast this is a non-null handle type
-  static constexpr bool has_non_null_guarantee = true;
 
   /// Creates a new `typed_actor` type by extending this one with `Es...`.
   template <class... Es>
@@ -131,6 +125,7 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
   using stateful_broker_pointer =
     stateful_actor<State, broker_base>*;
 
+  typed_actor() = default;
   typed_actor(typed_actor&&) = default;
   typed_actor(const typed_actor&) = default;
   typed_actor& operator=(typed_actor&&) = default;
@@ -142,17 +137,21 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
                     signatures,
                     detail::type_list<Ts...>
                   >::value,
-                  "Cannot assign invalid handle");
+                  "Cannot assign incompatible handle");
   }
 
   // allow `handle_type{this}` for typed actors
-  template <class... Ts>
-  typed_actor(typed_actor<Ts...>* ptr) : ptr_(ptr->ctrl()) {
+  template <class T>
+  typed_actor(T* ptr,
+              typename std::enable_if<
+                std::is_base_of<statically_typed_actor_base, T>::value
+              >::type* = 0)
+      : ptr_(ptr->ctrl()) {
     static_assert(detail::tl_subset_of<
                     signatures,
-                    detail::type_list<Ts...>
+                    typename T::signatures
                   >::value,
-                  "Cannot assign invalid handle");
+                  "Cannot assign T* to incompatible handle type");
     CAF_ASSERT(ptr != nullptr);
   }
 
@@ -162,13 +161,23 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
                     signatures,
                     detail::type_list<Ts...>
                   >::value,
-                  "Cannot assign invalid handle");
+                  "Cannot assign incompatible handle");
     ptr_ = other.ptr_;
     return *this;
   }
 
-  typed_actor(const unsafe_actor_handle_init_t&) {
+  explicit typed_actor(const unsafe_actor_handle_init_t&) CAF_DEPRECATED {
     // nop
+  }
+
+  /// Queries whether this actor handle is valid.
+  inline explicit operator bool() const {
+    return static_cast<bool>(ptr_);
+  }
+
+  /// Queries whether this actor handle is invalid.
+  inline bool operator!() const {
+    return !ptr_;
   }
 
   /// Queries the address of the stored actor.
@@ -196,23 +205,10 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
     ptr_.swap(other.ptr_);
   }
 
-  template <class... Ts>
-  typename detail::mpi_bind<
-    caf::typed_actor,
-    detail::type_list<Sigs...>,
-    typename std::decay<Ts>::type...
-  >::type
-  bind(Ts&&... xs) const {
-    auto& sys = *(ptr_->home_system);
-    auto ptr = make_actor<decorator::adapter, strong_actor_ptr>(
-      sys.next_actor_id(), sys.node(), &sys, ptr_, make_message(xs...));
-    return {ptr.release(), false};
-  }
-
   /// Queries whether this object was constructed using
   /// `unsafe_actor_handle_init` or is in moved-from state.
-  bool unsafe() const {
-    return ! ptr_;
+  bool unsafe() const CAF_DEPRECATED {
+    return !ptr_;
   }
 
   /// @cond PRIVATE
@@ -241,13 +237,17 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
     // nop
   }
 
-  template <class Processor>
-  friend void serialize(Processor& proc, typed_actor& x, const unsigned int v) {
-    serialize(proc, x.ptr_, v);
-  }
-
   friend inline std::string to_string(const typed_actor& x) {
     return to_string(x.ptr_);
+  }
+
+  friend inline void append_to_string(std::string& x, const typed_actor& y) {
+    return append_to_string(x, y.ptr_);
+  }
+
+  template <class Inspector>
+  friend typename Inspector::result_type inspect(Inspector& f, typed_actor& x) {
+    return f(x.ptr_);
   }
 
   /// Releases the reference held by handle `x`. Using the
@@ -259,8 +259,6 @@ class typed_actor : detail::comparable<typed_actor<Sigs...>>,
   /// @endcond
 
 private:
-  typed_actor() = default;
-
   actor_control_block* get() const noexcept {
     return ptr_.get();
   }
@@ -288,24 +286,16 @@ bool operator==(const typed_actor<Xs...>& x,
 template <class... Xs, class... Ys>
 bool operator!=(const typed_actor<Xs...>& x,
                 const typed_actor<Ys...>& y) noexcept {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// Returns a new actor that implements the composition `f.g(x) = f(g(x))`.
 /// @relates typed_actor
 template <class... Xs, class... Ys>
-typename detail::mpi_sequencer<
-  typed_actor,
-  detail::type_list<Xs...>,
-  Ys...
->::type
+composed_type_t<detail::type_list<Xs...>, detail::type_list<Ys...>>
 operator*(typed_actor<Xs...> f, typed_actor<Ys...> g) {
-  using result =
-    typename detail::mpi_sequencer<
-      typed_actor,
-      detail::type_list<Xs...>,
-      Ys...
-    >::type;
+  using result = composed_type_t<detail::type_list<Xs...>,
+                                 detail::type_list<Ys...>>;
   auto& sys = g->home_system();
   auto mts = sys.message_types(detail::type_list<result>{});
   return make_actor<decorator::sequencer, result>(

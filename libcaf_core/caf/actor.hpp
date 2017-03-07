@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -26,6 +26,7 @@
 #include <utility>
 #include <type_traits>
 
+#include "caf/config.hpp"
 
 #include "caf/fwd.hpp"
 #include "caf/message.hpp"
@@ -42,7 +43,7 @@ namespace caf {
 template <class T>
 struct is_convertible_to_actor {
   static constexpr bool value =
-      ! std::is_base_of<statically_typed_actor_base, T>::value
+      !std::is_base_of<statically_typed_actor_base, T>::value
       && (std::is_base_of<actor_proxy, T>::value
           || std::is_base_of<local_actor, T>::value);
 };
@@ -51,6 +52,9 @@ template <>
 struct is_convertible_to_actor<scoped_actor> : std::true_type {
   // nop
 };
+
+template <class T>
+struct is_convertible_to_actor<T*> : is_convertible_to_actor<T> {};
 
 /// Identifies an untyped actor. Can be used with derived types
 /// of `event_based_actor`, `blocking_actor`, and `actor_proxy`.
@@ -61,12 +65,6 @@ public:
   // -- friend types that need access to private ctors
   friend class local_actor;
 
-  template <class>
-  friend class data_processor;
-
-  template <class>
-  friend class detail::type_erased_value_impl;
-
   using signatures = none_t;
 
   // allow conversion via actor_cast
@@ -76,9 +74,7 @@ public:
   // tell actor_cast which semantic this type uses
   static constexpr bool has_weak_ptr_semantics = false;
 
-  // tell actor_cast this is a non-null handle type
-  static constexpr bool has_non_null_guarantee = true;
-
+  actor() = default;
   actor(actor&&) = default;
   actor(const actor&) = default;
   actor& operator=(actor&&) = default;
@@ -86,7 +82,7 @@ public:
 
   actor(const scoped_actor&);
 
-  explicit actor(const unsafe_actor_handle_init_t&);
+  explicit actor(const unsafe_actor_handle_init_t&) CAF_DEPRECATED;
 
   template <class T,
             class = typename std::enable_if<
@@ -114,6 +110,16 @@ public:
 
   actor& operator=(const scoped_actor& x);
 
+  /// Queries whether this actor handle is valid.
+  inline explicit operator bool() const {
+    return static_cast<bool>(ptr_);
+  }
+
+  /// Queries whether this actor handle is invalid.
+  inline bool operator!() const {
+    return !ptr_;
+  }
+
   /// Returns the address of the stored actor.
   actor_addr address() const noexcept;
 
@@ -135,16 +141,10 @@ public:
   /// Exchange content of `*this` and `other`.
   void swap(actor& other) noexcept;
 
-  /// Create a new actor decorator that presets or reorders inputs.
-  template <class... Ts>
-  actor bind(Ts&&... xs) const {
-    return bind_impl(make_message(std::forward<Ts>(xs)...));
-  }
-
   /// Queries whether this object was constructed using
   /// `unsafe_actor_handle_init` or is in moved-from state.
-  bool unsafe() const {
-    return ! ptr_;
+  bool unsafe() const CAF_DEPRECATED {
+    return !ptr_;
   }
 
   /// @cond PRIVATE
@@ -164,16 +164,20 @@ public:
 
   actor(actor_control_block*, bool);
 
-  template <class Processor>
-  friend void serialize(Processor& proc, actor& x, const unsigned int v) {
-    serialize(proc, x.ptr_, v);
-  }
+  /// @endcond
 
   friend inline std::string to_string(const actor& x) {
     return to_string(x.ptr_);
   }
 
-  /// @endcond
+  friend inline void append_to_string(std::string& x, const actor& y) {
+    return append_to_string(x, y.ptr_);
+  }
+
+  template <class Inspector>
+  friend typename Inspector::result_type inspect(Inspector& f, actor& x) {
+    return inspect(f, x.ptr_);
+  }
 
   /// Releases the reference held by handle `x`. Using the
   /// handle after invalidating it is undefined behavior.
@@ -182,10 +186,6 @@ public:
   }
 
 private:
-  actor() = default;
-
-  actor bind_impl(message msg) const;
-
   inline actor_control_block* get() const noexcept {
     return ptr_.get();
   }

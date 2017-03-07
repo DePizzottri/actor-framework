@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  * Raphael Hiesgen <raphael.hiesgen (at) haw-hamburg.de>                      *
  *                                                                            *
@@ -76,8 +76,10 @@ error ip_bind(asio_tcp_socket_acceptor& fd, uint16_t port,
     fd.bind(ep, ec);
     if (ec)
       return sec::cannot_open_port;
-    fd.listen();
-    return {};
+    fd.listen(asio_tcp_socket_acceptor::max_connections, ec);
+    if (ec)
+      return sec::cannot_open_port;
+    return none;
   };
   if (addr) {
     CAF_LOG_DEBUG(CAF_ARG(addr));
@@ -94,7 +96,7 @@ error ip_bind(asio_tcp_socket_acceptor& fd, uint16_t port,
 expected<connection_handle>
 asio_multiplexer::new_tcp_scribe(const std::string& host, uint16_t port) {
   auto sck = new_tcp_connection(service(), host, port);
-  if (! sck)
+  if (!sck)
     return std::move(sck.error());
   asio_tcp_socket fd{std::move(*sck)};
   auto id = int64_from_native_socket(fd.native_handle());
@@ -121,16 +123,16 @@ connection_handle asio_multiplexer::add_tcp_scribe(abstract_broker* self,
   CAF_LOG_TRACE("");
   class impl : public scribe {
   public:
-    impl(abstract_broker* ptr, asio_multiplexer& ref, Socket&& s)
+    impl(abstract_broker* ptr, asio_multiplexer& am, Socket&& s)
         : scribe(ptr, network::conn_hdl_from_socket(s)),
           launched_(false),
-          stream_(ref) {
+          stream_(am) {
       stream_.init(std::move(s));
     }
     void configure_read(receive_policy::config config) override {
       CAF_LOG_TRACE("");
       stream_.configure_read(config);
-      if (! launched_) {
+      if (!launched_) {
         launch();
       }
     }
@@ -162,9 +164,15 @@ connection_handle asio_multiplexer::add_tcp_scribe(abstract_broker* self,
     }
     void launch() {
       CAF_LOG_TRACE("");
-      CAF_ASSERT(! launched_);
+      CAF_ASSERT(!launched_);
       launched_ = true;
       stream_.start(this);
+    }
+    void add_to_loop() override {
+      stream_.activate(this);
+    }
+    void remove_from_loop() override {
+      stream_.passivate();
     }
  private:
     bool launched_;
@@ -193,7 +201,7 @@ asio_multiplexer::add_tcp_scribe(abstract_broker* self,
                                  const std::string& host, uint16_t port) {
   CAF_LOG_TRACE(CAF_ARG(self) << ", " << CAF_ARG(host) << ":" << CAF_ARG(port));
   auto conn = new_tcp_connection(service(), host, port);
-  if (! conn)
+  if (!conn)
     return std::move(conn.error());
   return add_tcp_scribe(self, std::move(*conn));
 }
@@ -238,12 +246,18 @@ asio_multiplexer::add_tcp_doorman(abstract_broker* self,
           acceptor_(am, s.get_io_service()) {
       acceptor_.init(std::move(s));
     }
-    void new_connection() override {
+    bool new_connection() override {
       CAF_LOG_TRACE("");
+      if (detached())
+        // we are already disconnected from the broker while the multiplexer
+        // did not yet remove the socket, this can happen if an I/O event causes
+        // the broker to call close_all() while the pollset contained
+        // further activities for the broker
+        return false;
       auto& am = acceptor_.backend();
-      msg().handle
-        = am.add_tcp_scribe(parent(), std::move(acceptor_.accepted_socket()));
-      invoke_mailbox_element(&am);
+      auto x = am.add_tcp_scribe(parent(),
+                                 std::move(acceptor_.accepted_socket()));
+      return doorman::new_connection(&am, x);
     }
     void stop_reading() override {
       CAF_LOG_TRACE("");
@@ -260,6 +274,12 @@ asio_multiplexer::add_tcp_doorman(abstract_broker* self,
     }
     uint16_t port() const override {
       return acceptor_.socket_handle().local_endpoint().port();
+    }
+    void add_to_loop() override {
+      acceptor_.activate(this);
+    }
+    void remove_from_loop() override {
+      acceptor_.passivate();
     }
   private:
     network::asio_acceptor<asio_tcp_socket_acceptor> acceptor_;

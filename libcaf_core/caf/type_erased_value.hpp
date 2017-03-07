@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -25,6 +25,7 @@
 #include <functional>
 
 #include "caf/fwd.hpp"
+#include "caf/error.hpp"
 #include "caf/type_nr.hpp"
 
 namespace caf {
@@ -69,7 +70,7 @@ public:
 
   /// Checks whether the type of the stored value matches
   /// the type nr and type info object.
-  bool matches(uint16_t tnr, const std::type_info* tinf) const;
+  bool matches(uint16_t nr, const std::type_info* ptr) const;
 
   // -- convenience functions --------------------------------------------------
 
@@ -97,17 +98,13 @@ public:
 };
 
 /// @relates type_erased_value_impl
-template <class Processor>
-typename std::enable_if<Processor::is_saving::value>::type
-serialize(Processor& proc, type_erased_value& x) {
-  x.save(proc);
+inline error inspect(serializer& f, type_erased_value& x) {
+  return x.save(f);
 }
 
 /// @relates type_erased_value_impl
-template <class Processor>
-typename std::enable_if<Processor::is_loading::value>::type
-serialize(Processor& proc, type_erased_value& x) {
-  x.load(proc);
+inline error inspect(deserializer& f, type_erased_value& x) {
+  return x.load(f);
 }
 
 /// @relates type_erased_value_impl

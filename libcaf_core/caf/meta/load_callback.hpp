@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,41 +17,33 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DECORATOR_ADAPTER_HPP
-#define CAF_DECORATOR_ADAPTER_HPP
+#ifndef CAF_META_LOAD_CALLBACK_HPP
+#define CAF_META_LOAD_CALLBACK_HPP
 
-#include "caf/actor.hpp"
-#include "caf/message.hpp"
-#include "caf/attachable.hpp"
-#include "caf/monitorable_actor.hpp"
+#include "caf/meta/annotation.hpp"
 
 namespace caf {
-namespace decorator {
+namespace meta {
 
-/// An actor decorator implementing `std::bind`-like compositions.
-/// Bound actors are hidden actors. A bound actor exits when its
-/// decorated actor exits. The decorated actor has no dependency
-/// on the bound actor by default, and exit of a bound actor has
-/// no effect on the decorated actor. Bound actors are hosted on
-/// the same actor system and node as decorated actors.
-class adapter : public monitorable_actor {
-public:
-  adapter(strong_actor_ptr decorated, message msg);
+template <class F>
+struct load_callback_t : annotation {
+  load_callback_t(F&& f) : fun(f) {
+    // nop
+  }
 
-  // non-system messages are processed and then forwarded;
-  // system messages are handled and consumed on the spot;
-  // in either case, the processing is done synchronously
-  void enqueue(mailbox_element_ptr what, execution_unit* host) override;
+  load_callback_t(load_callback_t&&) = default;
 
-protected:
-  void on_cleanup() override;
-
-private:
-  strong_actor_ptr decorated_;
-  message merger_;
+  F fun;
 };
 
-} // namespace decorator
+/// Returns an annotation that allows inspectors to call
+/// user-defined code after performing load operations.
+template <class F>
+load_callback_t<F> load_callback(F fun) {
+  return {std::move(fun)};
+}
+
+} // namespace meta
 } // namespace caf
 
-#endif // CAF_DECORATOR_ADAPTER_HPP
+#endif // CAF_META_LOAD_CALLBACK_HPP

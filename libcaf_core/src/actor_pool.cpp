@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -54,7 +54,7 @@ namespace {
 void broadcast_dispatch(actor_system&, actor_pool::uplock&,
                         const actor_pool::actor_vec& vec,
                         mailbox_element_ptr& ptr, execution_unit* host) {
-  CAF_ASSERT(! vec.empty());
+  CAF_ASSERT(!vec.empty());
   auto msg = ptr->move_content_to_message();
   for (auto& worker : vec)
     worker->enqueue(ptr->sender, ptr->mid, msg, host);
@@ -104,7 +104,7 @@ actor actor_pool::make(execution_unit* eu, policy pol) {
 }
 
 actor actor_pool::make(execution_unit* eu, size_t num_workers,
-                       factory fac, policy pol) {
+                       const factory& fac, policy pol) {
   auto res = make(eu, std::move(pol));
   auto ptr = static_cast<actor_pool*>(actor_cast<abstract_actor*>(res));
   auto res_addr = ptr->address();
@@ -124,7 +124,7 @@ void actor_pool::enqueue(mailbox_element_ptr what, execution_unit* eu) {
 }
 
 actor_pool::actor_pool(actor_config& cfg) : monitorable_actor(cfg) {
-  is_registered(true);
+  register_at_system();
 }
 
 void actor_pool::on_cleanup() {
@@ -149,7 +149,7 @@ bool actor_pool::filter(upgrade_lock<detail::shared_spinlock>& guard,
       unique_guard.unlock();
       for (auto& w : workers)
         anon_send(w, tmp);
-      is_registered(false);
+      unregister_from_system();
     }
     return true;
   }
@@ -183,8 +183,21 @@ bool actor_pool::filter(upgrade_lock<detail::shared_spinlock>& guard,
     auto last = workers_.end();
     auto i = std::find(workers_.begin(), last, what);
     if (i != last) {
+      default_attachable::observe_token tk{address(),
+                                           default_attachable::monitor};
+      what->detach(tk);
       workers_.erase(i);
     }
+    return true;
+  }
+  if (content.match_elements<sys_atom, delete_atom>()) {
+    upgrade_to_unique_lock<detail::shared_spinlock> unique_guard{guard};
+    for (auto& worker : workers_) {
+      default_attachable::observe_token tk{address(),
+                                           default_attachable::monitor};
+      worker->detach(tk);
+    }
+    workers_.clear();
     return true;
   }
   if (content.match_elements<sys_atom, get_atom>()) {
@@ -210,7 +223,7 @@ void actor_pool::quit(execution_unit* host) {
   // we can safely run our cleanup code here without holding
   // workers_mtx_ because abstract_actor has its own lock
   if (cleanup(planned_reason_, host))
-    is_registered(false);
+    unregister_from_system();
 }
 
 } // namespace caf

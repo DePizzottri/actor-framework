@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,49 +17,23 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_UNBOXED_HPP
-#define CAF_DETAIL_UNBOXED_HPP
+#ifndef CAF_DETAIL_ENUM_TO_STRING_HPP
+#define CAF_DETAIL_ENUM_TO_STRING_HPP
 
-#include <memory>
-
-#include "caf/atom.hpp"
-#include "caf/detail/wrapped.hpp"
+#include <type_traits>
 
 namespace caf {
 namespace detail {
 
-// strips `wrapped` and converts `atom_constant` to `atom_value`
-template <class T>
-struct unboxed {
-  using type = T;
-};
-
-template <class T>
-struct unboxed<detail::wrapped<T>> {
-  using type = typename detail::wrapped<T>::type;
-};
-
-template <class T>
-struct unboxed<detail::wrapped<T>(&)()> {
-  using type = typename detail::wrapped<T>::type;
-};
-
-template <class T>
-struct unboxed<detail::wrapped<T>()> {
-  using type = typename detail::wrapped<T>::type;
-};
-
-template <class T>
-struct unboxed<detail::wrapped<T>(*)()> {
-  using type = typename detail::wrapped<T>::type;
-};
-
-template <atom_value V>
-struct unboxed<atom_constant<V>> {
-  using type = atom_value;
-};
+/// Converts x to its underlying type and fetches the name from the
+/// lookup table. Assumes consecutive enum values.
+template <class E, size_t N>
+const char* enum_to_string(E x, const char* (&lookup_table)[N]) {
+  auto index = static_cast<typename std::underlying_type<E>::type>(x);
+  return index < N ? lookup_table[index] : "<unknown>";
+}
 
 } // namespace detail
 } // namespace caf
 
-#endif // CAF_DETAIL_UNBOXED_HPP
+#endif // CAF_DETAIL_ENUM_TO_STRING_HPP

@@ -53,6 +53,7 @@ add(custom_type custom_types_3)
 # basic remoting
 add(remoting group_chat)
 add(remoting group_server)
+add(remoting remote_spawn)
 add(remoting distributed_calculator)
 
 # basic I/O with brokers
@@ -66,14 +67,14 @@ if(NOT CAF_NO_PROTOBUF_EXAMPLES)
     include_directories(${PROTOBUF_INCLUDE_DIR})
     # add binary dir as include path as generated headers will be located there
     include_directories(${CMAKE_CURRENT_BINARY_DIR})
-    add_executable(protobuf_broker brokers/protobuf_broker.cpp ${ProtoSources})
+    add_executable(protobuf_broker broker/protobuf_broker.cpp ${ProtoSources})
     target_link_libraries(protobuf_broker ${CMAKE_DL_LIBS} ${CAF_LIBRARIES} ${PTHREAD_LIBRARIES} ${PROTOBUF_LIBRARIES})
     add_dependencies(protobuf_broker all_examples)
   endif(PROTOBUF_FOUND AND PROTOBUF_PROTOC_EXECUTABLE)
 endif()
 
 if(NOT CAF_NO_QT_EXAMPLES)
-  find_package(Qt5 COMPONENTS Core Gui Widgets)
+  find_package(Qt5 COMPONENTS Core Gui Widgets QUIET)
   if(Qt5_FOUND)
     message(STATUS "Found Qt5")
     #include(${QT_USE_FILE})

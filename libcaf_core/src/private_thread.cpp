@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -35,6 +35,7 @@ private_thread::private_thread(scheduled_actor* self)
 
 void private_thread::run() {
   auto job = const_cast<scheduled_actor*>(self_);
+  CAF_SET_LOGGER_SYS(&job->system());
   CAF_PUSH_AID(job->id());
   CAF_LOG_TRACE("");
   scoped_execution_unit ctx{&job->system()};
@@ -59,7 +60,7 @@ void private_thread::run() {
       }
     } while (resume_later);
     // wait until actor becomes ready again or was destroyed
-    if (! await_resume())
+    if (!await_resume())
       return;
   }
 }
@@ -102,7 +103,7 @@ void private_thread::notify_self_destroyed() {
 
 void private_thread::await_self_destroyed() {
   std::unique_lock<std::mutex> guard(mtx_);
-  while (! self_destroyed_)
+  while (!self_destroyed_)
     cv_.wait(guard);
 }
 

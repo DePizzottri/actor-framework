@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,41 +17,48 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_PURGE_REFS_HPP
-#define CAF_DETAIL_PURGE_REFS_HPP
+#ifndef CAF_DETAIL_SQUASHED_INT_HPP
+#define CAF_DETAIL_SQUASHED_INT_HPP
 
-#include <functional>
+#include <cstdint>
+#include <type_traits>
 
-#include "caf/detail/type_traits.hpp"
+#include "caf/detail/type_list.hpp"
 
 namespace caf {
 namespace detail {
 
-template <class T>
-struct purge_refs_impl {
-  using type = T;
-};
+/// Compile-time list of integer types types.
+using int_types_by_size =
+  detail::type_list<                      // bytes
+    void,                                 // 0
+    detail::type_pair<int8_t, uint8_t>,   // 1
+    detail::type_pair<int16_t, uint16_t>, // 2
+    void,                                 // 3
+    detail::type_pair<int32_t, uint32_t>, // 4
+    void,                                 // 5
+    void,                                 // 6
+    void,                                 // 7
+    detail::type_pair<int64_t, uint64_t>  // 8
+  >;
 
+/// Squashes integer types into [u]int_[8|16|32|64]_t equivalents
 template <class T>
-struct purge_refs_impl<std::reference_wrapper<T>> {
-  using type = T;
-};
-
-template <class T>
-struct purge_refs_impl<std::reference_wrapper<const T>> {
-  using type = T;
-};
-
-/// Removes references and reference wrappers.
-template <class T>
-struct purge_refs {
-  using type =
-    typename purge_refs_impl<
-      typename std::decay<T>::type
+struct squashed_int {
+  using tpair = typename detail::tl_at<int_types_by_size, sizeof(T)>::type;
+  using type = 
+    typename std::conditional<
+      std::is_signed<T>::value,
+      typename tpair::first,
+      typename tpair::second
     >::type;
 };
+
+template <class T>
+using squashed_int_t = typename squashed_int<T>::type;
 
 } // namespace detail
 } // namespace caf
 
-#endif // CAF_DETAIL_PURGE_REFS_HPP
+#endif // CAF_DETAIL_SQUASHED_INT_HPP
+

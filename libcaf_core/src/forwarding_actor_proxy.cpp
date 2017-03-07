@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -16,6 +16,8 @@
  * http://opensource.org/licenses/BSD-3-Clause and                            *
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
+
+#include <utility>
 
 #include "caf/forwarding_actor_proxy.hpp"
 
@@ -28,12 +30,12 @@ namespace caf {
 
 forwarding_actor_proxy::forwarding_actor_proxy(actor_config& cfg, actor mgr)
     : actor_proxy(cfg),
-      manager_(mgr) {
+      manager_(std::move(mgr)) {
   // nop
 }
 
 forwarding_actor_proxy::~forwarding_actor_proxy() {
-  if (! manager_.unsafe())
+  if (manager_)
     anon_send(manager_, make_message(delete_atom::value, node(), id()));
 }
 
@@ -54,10 +56,10 @@ void forwarding_actor_proxy::forward_msg(strong_actor_ptr sender,
                 << CAF_ARG(mid) << CAF_ARG(msg));
   forwarding_stack tmp;
   shared_lock<detail::shared_spinlock> guard_(manager_mtx_);
-  if (! manager_.unsafe())
+  if (manager_)
     manager_->enqueue(nullptr, invalid_message_id,
                       make_message(forward_atom::value, std::move(sender),
-                                   fwd ? *fwd : tmp,
+                                   fwd != nullptr ? *fwd : tmp,
                                    strong_actor_ptr{ctrl()},
                                    mid, std::move(msg)),
                       nullptr);
@@ -80,7 +82,7 @@ bool forwarding_actor_proxy::link_impl(linking_operation op,
         // causes remote actor to link to (proxy of) other
         // receiving peer will call: this->local_link_to(other)
         forward_msg(ctrl(), invalid_message_id,
-                    make_message(link_atom::value, other->address()));
+                    make_message(link_atom::value, other->ctrl()));
         return true;
       }
       break;
@@ -88,7 +90,7 @@ bool forwarding_actor_proxy::link_impl(linking_operation op,
       if (remove_link_impl(other)) {
         // causes remote actor to unlink from (proxy of) other
         forward_msg(ctrl(), invalid_message_id,
-                    make_message(unlink_atom::value, other->address()));
+                    make_message(unlink_atom::value, other->ctrl()));
         return true;
       }
       break;
@@ -96,7 +98,7 @@ bool forwarding_actor_proxy::link_impl(linking_operation op,
       if (establish_backlink_impl(other)) {
         // causes remote actor to unlink from (proxy of) other
         forward_msg(ctrl(), invalid_message_id,
-                    make_message(link_atom::value, other->address()));
+                    make_message(link_atom::value, other->ctrl()));
         return true;
       }
       break;
@@ -104,7 +106,7 @@ bool forwarding_actor_proxy::link_impl(linking_operation op,
       if (remove_backlink_impl(other)) {
         // causes remote actor to unlink from (proxy of) other
         forward_msg(ctrl(), invalid_message_id,
-                    make_message(unlink_atom::value, other->address()));
+                    make_message(unlink_atom::value, other->ctrl()));
         return true;
       }
       break;

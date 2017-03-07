@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -70,12 +70,10 @@ protected:
   }
 
   void stop() override {
-    CAF_LOG_TRACE("");
     // shutdown workers
     class shutdown_helper : public resumable, public ref_counted {
     public:
       resumable::resume_result resume(execution_unit* ptr, size_t) override {
-        CAF_LOG_DEBUG("shutdown_helper::resume => shutdown worker");
         CAF_ASSERT(ptr != nullptr);
         std::unique_lock<std::mutex> guard(mtx);
         last_worker = ptr;
@@ -104,8 +102,7 @@ protected:
       alive_workers.insert(worker_by_id(i));
       sh.ref(); // make sure reference count is high enough
     }
-    CAF_LOG_DEBUG("enqueue shutdown_helper into each worker");
-    while (! alive_workers.empty()) {
+    while (!alive_workers.empty()) {
       (*alive_workers.begin())->external_enqueue(&sh);
       // since jobs can be stolen, we cannot assume that we have
       // actually shut down the worker we've enqueued sh to

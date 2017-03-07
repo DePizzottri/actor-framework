@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -121,7 +121,7 @@ CAF_TEST(single_res_function_view) {
   g.assign(system.spawn(multiplier));
   CAF_CHECK_EQUAL(g(10, 20), 200);
   g.assign(system.spawn(divider));
-  CAF_CHECK(! g(1, 0));
+  CAF_CHECK(!g(1, 0));
   g.assign(system.spawn(divider));
   CAF_CHECK_EQUAL(g(4, 2), 2);
 }

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -16,6 +16,8 @@
  * http://opensource.org/licenses/BSD-3-Clause and                            *
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
+
+#include <utility>
 
 #include "caf/config.hpp"
 
@@ -81,9 +83,9 @@ struct float_or_int : event_based_actor {
 
 class popular_actor : public event_based_actor { // popular actors have a buddy
 public:
-  explicit popular_actor(actor_config& cfg, const actor& buddy_arg)
+  explicit popular_actor(actor_config& cfg, actor  buddy_arg)
       : event_based_actor(cfg),
-        buddy_(buddy_arg) {
+        buddy_(std::move(buddy_arg)) {
     // don't pollute unit test output with (provoked) warnings
     set_default_handler(drop);
   }
@@ -450,6 +452,32 @@ CAF_TEST(async_request) {
     };
   });
   anon_send(foo, 1);
+}
+
+CAF_TEST(skip_responses) {
+  auto mirror = system.spawn<sync_mirror>();
+  auto future = self->request(mirror, infinite, 42);
+  self->send(mirror, 42);
+  self->receive([](int x) {
+    CAF_CHECK_EQUAL(x, 42);
+  });
+  // second receive must time out
+  self->receive(
+    [](int) {
+      CAF_FAIL("received response message as ordinary message");
+    },
+    after(std::chrono::milliseconds(20)) >> [] {
+      CAF_MESSAGE("second receive timed out as expected");
+    }
+  );
+  future.receive(
+    [](int x) {
+      CAF_CHECK_EQUAL(x, 42);
+    },
+    [&](const error& err) {
+      CAF_FAIL(system.render(err));
+    }
+  );
 }
 
 CAF_TEST_FIXTURE_SCOPE_END()

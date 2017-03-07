@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -31,6 +31,9 @@
 #include "caf/memory_managed.hpp"
 #include "caf/type_erased_tuple.hpp"
 #include "caf/actor_control_block.hpp"
+
+#include "caf/meta/type_name.hpp"
+#include "caf/meta/omittable_if_empty.hpp"
 
 #include "caf/detail/disposer.hpp"
 #include "caf/detail/tuple_vals.hpp"
@@ -63,10 +66,10 @@ public:
 
   mailbox_element();
 
-  mailbox_element(strong_actor_ptr&& sender, message_id id,
-                  forwarding_stack&& stages);
+  mailbox_element(strong_actor_ptr&& x, message_id y,
+                  forwarding_stack&& z);
 
-  virtual ~mailbox_element();
+  ~mailbox_element() override;
 
   type_erased_tuple& content() override;
 
@@ -87,6 +90,13 @@ protected:
   empty_type_erased_tuple dummy_;
 };
 
+/// @relates mailbox_element
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, mailbox_element& x) {
+  return f(meta::type_name("mailbox_element"), x.sender, x.mid,
+           meta::omittable_if_empty(), x.stages, x.content());
+}
+
 /// Encapsulates arbitrary data in a message element.
 template <class... Ts>
 class mailbox_element_vals
@@ -94,18 +104,18 @@ class mailbox_element_vals
       public detail::tuple_vals_impl<type_erased_tuple, Ts...> {
 public:
   template <class... Us>
-  mailbox_element_vals(strong_actor_ptr&& sender, message_id id,
-                       forwarding_stack&& stages, Us&&... xs)
-      : mailbox_element(std::move(sender), id, std::move(stages)),
+  mailbox_element_vals(strong_actor_ptr&& x0, message_id x1,
+                       forwarding_stack&& x2, Us&&... xs)
+      : mailbox_element(std::move(x0), x1, std::move(x2)),
         detail::tuple_vals_impl<type_erased_tuple, Ts...>(std::forward<Us>(xs)...) {
     // nop
   }
 
-  type_erased_tuple& content() {
+  type_erased_tuple& content() override {
     return *this;
   }
 
-  message move_content_to_message() {
+  message move_content_to_message() override {
     message_factory f;
     auto& xs = this->data();
     return detail::apply_moved_args(f, detail::get_indices(xs), xs);
@@ -121,9 +131,9 @@ template <class... Ts>
 class mailbox_element_view : public mailbox_element,
                              public detail::type_erased_tuple_view<Ts...> {
 public:
-  mailbox_element_view(strong_actor_ptr&& sender, message_id id,
-                       forwarding_stack&& stages, Ts&... xs)
-    : mailbox_element(std::move(sender), id, std::move(stages)),
+  mailbox_element_view(strong_actor_ptr&& x0, message_id x1,
+                       forwarding_stack&& x2, Ts&... xs)
+    : mailbox_element(std::move(x0), x1, std::move(x2)),
       detail::type_erased_tuple_view<Ts...>(xs...) {
     // nop
   }
@@ -150,7 +160,7 @@ make_mailbox_element(strong_actor_ptr sender, message_id id,
 /// @relates mailbox_element
 template <class T, class... Ts>
 typename std::enable_if<
-  ! std::is_same<typename std::decay<T>::type, message>::value
+  !std::is_same<typename std::decay<T>::type, message>::value
   || (sizeof...(Ts) > 0),
   mailbox_element_ptr
 >::type
@@ -170,8 +180,6 @@ make_mailbox_element(strong_actor_ptr sender, message_id id,
                       std::forward<T>(x), std::forward<Ts>(xs)...);
   return mailbox_element_ptr{ptr};
 }
-
-std::string to_string(const mailbox_element&);
 
 } // namespace caf
 

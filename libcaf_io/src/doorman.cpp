@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -44,6 +44,11 @@ void doorman::io_failure(execution_unit* ctx, network::operation op) {
   // keep compiler happy when compiling w/o logging
   static_cast<void>(op);
   detach(ctx, true);
+}
+
+bool doorman::new_connection(execution_unit* ctx, connection_handle x) {
+  msg().handle = x;
+  return invoke_mailbox_element(ctx);
 }
 
 } // namespace io

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -59,7 +59,7 @@ public:
   optional<route> lookup(const node_id& target);
 
   /// Returns the ID of the peer connected via `hdl` or
-  /// `invalid_node_id` if `hdl` is unknown.
+  /// `none` if `hdl` is unknown.
   node_id lookup_direct(const connection_handle& hdl) const;
 
   /// Returns the handle offering a direct connection to `nid` or
@@ -67,15 +67,15 @@ public:
   connection_handle lookup_direct(const node_id& nid) const;
 
   /// Returns the next hop that would be chosen for `nid`
-  /// or `invalid_node_id` if there's no indirect route to `nid`.
+  /// or `none` if there's no indirect route to `nid`.
   node_id lookup_indirect(const node_id& nid) const;
 
   /// Flush output buffer for `r`.
   void flush(const route& r);
 
   /// Adds a new direct route to the table.
-  /// @pre `hdl != invalid_connection_handle && nid != invalid_node_id`
-  void add_direct(const connection_handle& hdl, const node_id& dest);
+  /// @pre `hdl != invalid_connection_handle && nid != none`
+  void add_direct(const connection_handle& hdl, const node_id& nid);
 
   /// Adds a new indirect route to the table.
   bool add_indirect(const node_id& hop, const node_id& dest);

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,7 +19,7 @@
 
 // This file is partially included in the manual, do not modify
 // without updating the references in the *.tex files!
-// Manual references: lines 32-84 (Error.tex)
+// Manual references: lines 32-93 (Error.tex)
 
 #ifndef CAF_SEC_HPP
 #define CAF_SEC_HPP
@@ -42,8 +42,7 @@ enum class sec : uint8_t {
   request_timeout,
   /// Indicates that requested group module does not exist.
   no_such_group_module,
-  /// Unpublishing or connecting failed because
-  /// requested actor is not bound to given port.
+  /// Unpublishing or connecting failed: no actor bound to given port.
   no_actor_published_at_port,
   /// Connecting failed because a remote actor had an unexpected interface.
   unexpected_actor_messaging_interface,
@@ -79,12 +78,24 @@ enum class sec : uint8_t {
   cannot_publish_invalid_actor,
   /// A remote spawn failed because the provided types did not match.
   cannot_spawn_actor_from_arguments,
+  /// Serialization failed because there was not enough data to read.
+  end_of_stream,
+  /// Serialization failed because no CAF context is available.
+  no_context,
+  /// Serialization failed because CAF misses run-time type information.
+  unknown_type,
+  /// Serialization of actors failed because no proxy registry is available.
+  no_proxy_registry,
+  /// An exception was thrown during message handling.
+  runtime_error,
+  /// Linking to a remote actor failed because actor no longer exists.
+  remote_linking_failed,
   /// A function view was called without assigning an actor first.
   bad_function_call
 };
 
 /// @relates sec
-const char* to_string(sec);
+std::string to_string(sec);
 
 /// @relates sec
 error make_error(sec);

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -56,7 +56,7 @@ using dummy2 = dummy1::extend<reacts_to<ok_atom>>;
 static_assert(std::is_convertible<dummy2, dummy1>::value,
               "handle not assignable to narrower definition");
 
-//static_assert(! std::is_convertible<dummy1, dummy2>::value,
+//static_assert(!std::is_convertible<dummy1, dummy2>::value,
 //              "handle is assignable to broader definition");
 
 using dummy3 = typed_actor<reacts_to<float, int>>;
@@ -69,10 +69,10 @@ static_assert(std::is_convertible<dummy5, dummy3>::value,
 static_assert(std::is_convertible<dummy5, dummy4>::value,
               "handle not assignable to narrower definition");
 
-//static_assert(! std::is_convertible<dummy3, dummy5>::value,
+//static_assert(!std::is_convertible<dummy3, dummy5>::value,
 //              "handle is assignable to broader definition");
 
-//static_assert(! std::is_convertible<dummy4, dummy5>::value,
+//static_assert(!std::is_convertible<dummy4, dummy5>::value,
 //              "handle is assignable to broader definition");
 
 /******************************************************************************
@@ -84,10 +84,9 @@ struct my_request {
   int b;
 };
 
-template <class Processor>
-void serialize(Processor& proc, my_request& x, const unsigned int) {
-  proc & x.a;
-  proc & x.b;
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, my_request& x) {
+  return f(x.a, x.b);
 }
 
 using server_type = typed_actor<replies_to<my_request>::with<bool>>;
@@ -116,7 +115,7 @@ public:
   }
 };
 
-void client(event_based_actor* self, actor parent, server_type serv) {
+void client(event_based_actor* self, const actor& parent, const server_type& serv) {
   self->request(serv, infinite, my_request{0, 0}).then(
     [=](bool val1) {
       CAF_CHECK_EQUAL(val1, true);
@@ -212,7 +211,7 @@ using string_actor = typed_actor<replies_to<string>::with<string>>;
 
 string_actor::behavior_type string_reverter() {
   return {
-    [](string& str) {
+    [](string& str) -> string {
       std::reverse(str.begin(), str.end());
       return std::move(str);
     }
@@ -246,7 +245,7 @@ maybe_string_actor::behavior_type maybe_string_reverter() {
 }
 
 maybe_string_actor::behavior_type
-maybe_string_delegator(maybe_string_actor::pointer self, maybe_string_actor x) {
+maybe_string_delegator(maybe_string_actor::pointer self, const maybe_string_actor& x) {
   self->link_to(x);
   return {
     [=](string& s) -> delegated<ok_atom, string> {
@@ -260,6 +259,8 @@ maybe_string_delegator(maybe_string_actor::pointer self, maybe_string_actor x) {
  ******************************************************************************/
 
 using int_actor = typed_actor<replies_to<int>::with<int>>;
+
+using float_actor = typed_actor<reacts_to<float>>;
 
 int_actor::behavior_type int_fun() {
   return {
@@ -294,6 +295,25 @@ behavior foo2(event_based_actor* self) {
     [=](int i, int_actor server) {
       self->delegate(server, i);
       self->quit();
+    }
+  };
+}
+
+float_actor::behavior_type float_fun(float_actor::pointer self) {
+  return {
+    [=](float a) {
+      CAF_CHECK_EQUAL(a, 1.0f);
+      self->quit(exit_reason::user_shutdown);
+    }
+  };
+}
+
+int_actor::behavior_type foo3(int_actor::pointer self) {
+  auto b = self->spawn<linked>(float_fun);
+  self->send(b, 1.0f);
+  return {
+    [=](int) {
+      return 0;
     }
   };
 }
@@ -399,8 +419,7 @@ CAF_TEST(event_testee_series) {
       result = str;
     },
     after(chrono::minutes(1)) >> [&] {
-      CAF_ERROR("event_testee does not reply");
-      throw runtime_error("event_testee does not reply");
+      CAF_FAIL("event_testee does not reply");
     }
   );
   CAF_CHECK_EQUAL(result, "wait4int");
@@ -428,7 +447,7 @@ CAF_TEST(maybe_string_delegator_chain) {
   CAF_MESSAGE("send empty string, expect error");
   self->request(aut, infinite, "").receive(
     [](ok_atom, const string&) {
-      throw std::logic_error("unexpected result!");
+      CAF_FAIL("unexpected string response");
     },
     [](const error& err) {
       CAF_CHECK_EQUAL(err.category(), atom("mock"));
@@ -453,6 +472,7 @@ CAF_TEST(sending_typed_actors) {
       CAF_CHECK_EQUAL(i, 100);
     }
   );
+  self->spawn(foo3);
 }
 
 CAF_TEST(sending_typed_actors_and_down_msg) {

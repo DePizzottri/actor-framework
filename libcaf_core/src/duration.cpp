@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -21,36 +21,41 @@
 
 #include "caf/duration.hpp"
 
+#include "caf/detail/enum_to_string.hpp"
+
 namespace caf {
 
-std::string to_string(const time_unit& x) {
-  switch (x) {
-    case time_unit::seconds:
-      return "seconds";
-    case time_unit::milliseconds:
-      return "milliseconds";
-    case time_unit::microseconds:
-      return "microseconds";
-    default:
-      return "invalid";
-  }
+namespace {
+
+const char* time_unit_strings[] = {
+  "invalid",
+  "minutes",
+  "seconds",
+  "milliseconds",
+  "microseconds",
+  "nanoseconds"
+};
+
+const char* time_unit_short_strings[] = {
+  "?",
+  "min",
+  "s",
+  "ms",
+  "us",
+  "ns"
+};
+
+} // namespace <anonymous>
+
+std::string to_string(time_unit x) {
+  return detail::enum_to_string(x, time_unit_strings);
 }
 
 std::string to_string(const duration& x) {
+  if (x.unit == time_unit::invalid)
+    return "infinite";
   auto result = std::to_string(x.count);
-  switch (x.unit) {
-    case time_unit::seconds:
-      result += "s";
-      break;
-    case time_unit::milliseconds:
-      result += "ms";
-      break;
-    case time_unit::microseconds:
-      result += "us";
-      break;
-    default:
-      return "infinite";
-  }
+  result += detail::enum_to_string(x.unit, time_unit_short_strings);
   return result;
 }
 

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -65,6 +65,7 @@
 #include "caf/detail/int_list.hpp"
 #include "caf/detail/safe_equal.hpp"
 #include "caf/detail/type_traits.hpp"
+#include "caf/detail/enum_to_string.hpp"
 #include "caf/detail/get_mac_addresses.hpp"
 
 using namespace std;
@@ -79,9 +80,9 @@ struct raw_struct {
   string str;
 };
 
-template <class Processor>
-void serialize(Processor& proc, raw_struct& x) {
-  proc & x.str;
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, raw_struct& x) {
+  return f(x.str);
 }
 
 bool operator==(const raw_struct& lhs, const raw_struct& rhs) {
@@ -94,13 +95,10 @@ enum class test_enum : uint32_t {
   c
 };
 
+const char* test_enum_strings[] = { "a", "b", "c" };
+
 std::string to_string(test_enum x) {
-  switch (x) {
-    case test_enum::a: return "a";
-    case test_enum::b: return "b";
-    case test_enum::c: return "c";
-  }
-  return "???";
+  return detail::enum_to_string(x, test_enum_strings);
 }
 
 struct test_array {
@@ -108,10 +106,9 @@ struct test_array {
   int value2[2][4];
 };
 
-template <class Processor>
-void serialize(Processor& proc, test_array& x, const unsigned int) {
-  proc & x.value;
-  proc & x.value2;
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, test_array& x) {
+  return f(x.value, x.value2);
 }
 
 struct test_empty_non_pod {
@@ -125,9 +122,9 @@ struct test_empty_non_pod {
   }
 };
 
-template <class Processor>
-void serialize(Processor&, test_empty_non_pod&, const unsigned int) {
-  // nop
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, test_empty_non_pod&) {
+  return f();
 }
 
 class config : public actor_system_config {
@@ -144,6 +141,8 @@ struct fixture {
   int32_t i32 = -345;
   float f32 = 3.45f;
   double f64 = 54.3;
+  duration dur = duration{time_unit::seconds, 123};
+  timestamp ts = timestamp{timestamp::duration{1478715821 * 1000000000ll}};
   test_enum te = test_enum::b;
   string str = "Lorem ipsum dolor sit amet.";
   raw_struct rs;
@@ -161,29 +160,18 @@ struct fixture {
   scoped_execution_unit context;
   message msg;
 
-  template <class Processor>
-  void apply(Processor&) {
-    // end of recursion
-  }
-
-  template <class Processor, class T, class... Ts>
-  void apply(Processor& proc, T& x, Ts&... xs) {
-    proc & x;
-    apply(proc, xs...);
-  }
-
   template <class T, class... Ts>
   vector<char> serialize(T& x, Ts&... xs) {
     vector<char> buf;
     binary_serializer bs{&context, buf};
-    apply(bs, x, xs...);
+    bs(x, xs...);
     return buf;
   }
 
   template <class T, class... Ts>
   void deserialize(const vector<char>& buf, T& x, Ts&... xs) {
     binary_deserializer bd{&context, buf};
-    apply(bd, x, xs...);
+    bd(x, xs...);
   }
 
   // serializes `x` and then deserializes and returns the serialized value
@@ -209,7 +197,7 @@ struct fixture {
       : system(cfg),
         context(&system) {
     rs.str.assign(string(str.rbegin(), str.rend()));
-    msg = make_message(i32, te, str, rs);
+    msg = make_message(i32, dur, ts, te, str, rs);
   }
 };
 
@@ -273,6 +261,20 @@ CAF_TEST(double_values) {
   double x;
   deserialize(buf, x);
   CAF_CHECK_EQUAL(f64, x);
+}
+
+CAF_TEST(duration_values) {
+  auto buf = serialize(dur);
+  duration x;
+  deserialize(buf, x);
+  CAF_CHECK_EQUAL(dur, x);
+}
+
+CAF_TEST(timestamp_values) {
+  auto buf = serialize(ts);
+  timestamp x;
+  deserialize(buf, x);
+  CAF_CHECK_EQUAL(ts, x);
 }
 
 CAF_TEST(enum_classes) {
@@ -350,34 +352,15 @@ CAF_TEST(messages) {
   auto buf1 = serialize(msg);
   deserialize(buf1, x);
   CAF_CHECK_EQUAL(to_string(msg), to_string(x));
-  CAF_CHECK(is_message(x).equal(i32, te, str, rs));
+  CAF_CHECK(is_message(x).equal(i32, dur, ts, te, str, rs));
   // serialize fully dynamic message again (do another roundtrip)
   message y;
   auto buf2 = serialize(x);
   CAF_CHECK_EQUAL(buf1, buf2);
   deserialize(buf2, y);
   CAF_CHECK_EQUAL(to_string(msg), to_string(y));
-  CAF_CHECK(is_message(y).equal(i32, te, str, rs));
+  CAF_CHECK(is_message(y).equal(i32, dur, ts, te, str, rs));
 }
-
-/*
-CAF_TEST(actor_addr_via_message) {
-  auto testee = system.spawn([] {});
-  auto addr = actor_cast<actor_addr>(testee);
-  auto addr_msg = make_message(addr);
-  // serialize original message which uses tuple_vals and
-  // deserialize into a message which uses message builder
-  message x;
-  deserialize(serialize(addr_msg), x);
-  CAF_CHECK_EQUAL(to_string(addr_msg), to_string(x));
-  CAF_CHECK(is_message(x).equal(addr));
-  // serialize fully dynamic message again (do another roundtrip)
-  message y;
-  deserialize(serialize(x), y);
-  CAF_CHECK_EQUAL(to_string(addr_msg), to_string(y));
-  CAF_CHECK(is_message(y).equal(addr));
-}
-*/
 
 CAF_TEST(multiple_messages) {
   auto m = make_message(rs, te);
@@ -389,7 +372,7 @@ CAF_TEST(multiple_messages) {
   CAF_CHECK_EQUAL(std::make_tuple(t, to_string(m1), to_string(m2)),
                   std::make_tuple(te, to_string(m), to_string(msg)));
   CAF_CHECK(is_message(m1).equal(rs, te));
-  CAF_CHECK(is_message(m2).equal(i32, te, str, rs));
+  CAF_CHECK(is_message(m2).equal(i32, dur, ts, te, str, rs));
 }
 
 
@@ -413,7 +396,7 @@ CAF_TEST(type_erased_tuple) {
   auto tview = make_type_erased_tuple_view(str, i32);
   CAF_CHECK_EQUAL(to_string(tview), deep_to_string(std::make_tuple(str, i32)));
   auto buf = serialize(tview);
-  CAF_REQUIRE(buf.size() > 0);
+  CAF_REQUIRE(!buf.empty());
   std::string tmp1;
   int32_t tmp2;
   deserialize(buf, tmp1, tmp2);
@@ -429,21 +412,25 @@ CAF_TEST(streambuf_serialization) {
   // First, we check the standard use case in CAF where stream serializers own
   // their stream buffers.
   stream_serializer<vectorbuf> bs{vectorbuf{buf}};
-  bs << data;
+  auto e = bs(data);
+  CAF_REQUIRE_EQUAL(e, none);
   stream_deserializer<charbuf> bd{charbuf{buf}};
   std::string target;
-  bd >> target;
-  CAF_CHECK(data == target);
+  e = bd(target);
+  CAF_REQUIRE_EQUAL(e, none);
+  CAF_CHECK_EQUAL(data, target);
   // Second, we test another use case where the serializers only keep
   // references of the stream buffers.
   buf.clear();
   target.clear();
   vectorbuf vb{buf};
   stream_serializer<vectorbuf&> vs{vb};
-  vs << data;
+  e = vs(data);
+  CAF_REQUIRE_EQUAL(e, none);
   charbuf cb{buf};
   stream_deserializer<charbuf&> vd{cb};
-  vd >> target;
+  e = vd(target);
+  CAF_REQUIRE_EQUAL(e, none);
   CAF_CHECK(data == target);
 }
 
@@ -454,11 +441,13 @@ CAF_TEST(byte_sequence_optimization) {
   using streambuf_type = containerbuf<std::vector<uint8_t>>;
   streambuf_type cb{buf};
   stream_serializer<streambuf_type&> bs{cb};
-  bs << data;
+  auto e = bs(data);
+  CAF_REQUIRE(!e);
   data.clear();
   streambuf_type cb2{buf};
   stream_deserializer<streambuf_type&> bd{cb2};
-  bd >> data;
+  e = bd(data);
+  CAF_REQUIRE(!e);
   CAF_CHECK_EQUAL(data.size(), 42u);
   CAF_CHECK(std::all_of(data.begin(), data.end(),
                         [](uint8_t c) { return c == 0x2a; }));

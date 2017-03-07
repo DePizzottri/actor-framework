@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -27,13 +27,16 @@
 namespace caf {
 namespace detail {
 
+template <class Self>
 class default_invoke_result_visitor : public invoke_result_visitor {
 public:
-  inline default_invoke_result_visitor(local_actor* ptr) : self_(ptr) {
+  inline default_invoke_result_visitor(Self* ptr) : self_(ptr) {
     // nop
   }
 
-  ~default_invoke_result_visitor();
+  ~default_invoke_result_visitor() override {
+    // nop
+  }
 
   void operator()() override {
     // nop
@@ -76,14 +79,14 @@ private:
   template <class T>
   void delegate(T& x) {
     auto rp = self_->make_response_promise();
-    if (! rp.pending()) {
+    if (!rp.pending()) {
       CAF_LOG_DEBUG("suppress response message: invalid response promise");
       return;
     }
     deliver(rp, x);
   }
 
-  local_actor* self_;
+  Self* self_;
 };
 
 } // namespace detail

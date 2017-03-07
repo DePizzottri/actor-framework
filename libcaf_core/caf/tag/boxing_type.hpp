@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,77 +17,11 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_SINGLETON_MIXIN_HPP
-#define CAF_DETAIL_SINGLETON_MIXIN_HPP
-
-#include <utility>
-
-#include "caf/logger.hpp"
-
 namespace caf {
-namespace detail {
+namespace tag {
 
-// a mixin for simple singleton classes
-template <class Derived, class Base = void>
-class singleton_mixin : public Base {
-private:
-  friend class singletons;
+/// Allows the testing DSL to recognize that subtypes are boxing content types.
+struct boxing_type {};
 
-  static Derived* create_singleton() {
-    return new Derived;
-  }
-
-  void dispose() {
-    delete this;
-  }
-
-  void stop() {
-    // nop
-  }
-
-  void initialize() {
-    CAF_LOG_TRACE("");
-  }
-
-protected:
-  template <class... Ts>
-  singleton_mixin(Ts&&... xs) : Base(std::forward<Ts>(xs)...) {
-    // nop
-  }
-
-  virtual ~singleton_mixin() {
-    CAF_LOG_TRACE("");
-  }
-};
-
-template <class Derived>
-class singleton_mixin<Derived, void> {
-private:
-  friend class singletons;
-
-  static Derived* create_singleton() {
-    return new Derived;
-  }
-
-  void dispose() {
-    delete this;
-  }
-
-  void stop() {
-    // nop
-  }
-
-  void initialize() {
-    CAF_LOG_TRACE("");
-  }
-
-protected:
-  virtual ~singleton_mixin() {
-    CAF_LOG_TRACE("");
-  }
-};
-
-} // namespace detail
+} // namespace tag
 } // namespace caf
-
-#endif // CAF_DETAIL_SINGLETON_MIXIN_HPP

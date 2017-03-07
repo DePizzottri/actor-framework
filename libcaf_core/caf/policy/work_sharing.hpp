@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -38,7 +38,7 @@ public:
   // A thread-safe queue implementation.
   using queue_type = std::list<resumable*>;
 
-  ~work_sharing();
+  ~work_sharing() override;
 
   struct coordinator_data {
     inline explicit coordinator_data(scheduler::abstract_coordinator*) {
@@ -91,7 +91,7 @@ public:
   resumable* dequeue(Worker* self) {
     auto& parent_data = d(self->parent());
     std::unique_lock<std::mutex> guard(parent_data.lock);
-    parent_data.cv.wait(guard, [&] { return ! parent_data.queue.empty(); });
+    parent_data.cv.wait(guard, [&] { return !parent_data.queue.empty(); });
     resumable* job = parent_data.queue.front();
     parent_data.queue.pop_front();
     return job;

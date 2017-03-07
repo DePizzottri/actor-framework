@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -26,6 +26,7 @@
 #include <thread>
 
 #include "caf/fwd.hpp"
+#include "caf/send.hpp"
 #include "caf/node_id.hpp"
 #include "caf/expected.hpp"
 #include "caf/actor_system.hpp"
@@ -46,10 +47,22 @@ public:
 
   using hook_vector = std::vector<hook_uptr>;
 
-  ~middleman();
+  ~middleman() override;
 
-  /// Publishes `whom` at `port` and returns either an `error`
-  /// or the bound port.
+  /// Tries to open a port for other CAF instances to connect to.
+  /// @experimental
+  expected<uint16_t> open(uint16_t port, const char* cstr = nullptr,
+                          bool ru = false);
+
+  /// Closes port `port` regardless of whether an actor is published to it.
+  expected<void> close(uint16_t port);
+
+  /// Tries to connect to given node.
+  /// @experimental
+  expected<node_id> connect(std::string host, uint16_t port);
+
+  /// Tries to publish `whom` at `port` and returns either an
+  /// `error` or the bound port.
   /// @param whom Actor that should be published at `port`.
   /// @param port Unused TCP port.
   /// @param in The IP address to listen to or `INADDR_ANY` if `in == nullptr`.
@@ -69,7 +82,7 @@ public:
   /// @returns The actual port the OS uses after `bind()`. If `port == 0`
   ///          the OS chooses a random high-level port.
   expected<uint16_t> publish_local_groups(uint16_t port,
-                                          const char* addr = nullptr);
+                                          const char* in = nullptr);
 
   /// Unpublishes `whom` by closing `port` or all assigned ports if `port == 0`.
   /// @param whom Actor that should be unpublished at `port`.
@@ -79,28 +92,19 @@ public:
     return unpublish(whom.address(), port);
   }
 
-  /// Establish a new connection to the typed actor at `host` on given `port`.
-  /// @param host Valid hostname or IP address.
-  /// @param port TCP port.
-  /// @returns An `actor` to the proxy instance representing
-  ///          a remote actor or an `error`.
-  template <class ActorHandle>
-  expected<ActorHandle> typed_remote_actor(std::string host, uint16_t port) {
-    detail::type_list<ActorHandle> tk;
-    auto x = remote_actor(system().message_types(tk), std::move(host), port);
-    if (! x)
-      return x.error();
-    CAF_ASSERT(x && *x);
-    return actor_cast<ActorHandle>(std::move(*x));
-  }
-
   /// Establish a new connection to the actor at `host` on given `port`.
   /// @param host Valid hostname or IP address.
   /// @param port TCP port.
   /// @returns An `actor` to the proxy instance representing
   ///          a remote actor or an `error`.
-  inline expected<actor> remote_actor(std::string host, uint16_t port) {
-    return typed_remote_actor<actor>(std::move(host), port);
+  template <class ActorHandle = actor>
+  expected<ActorHandle> remote_actor(std::string host, uint16_t port) {
+    detail::type_list<ActorHandle> tk;
+    auto x = remote_actor(system().message_types(tk), std::move(host), port);
+    if (!x)
+      return x.error();
+    CAF_ASSERT(x && *x);
+    return actor_cast<ActorHandle>(std::move(*x));
   }
 
   /// <group-name>@<host>:<port>
@@ -149,7 +153,7 @@ public:
 
   /// Returns whether this middleman has any hooks installed.
   inline bool has_hook() const {
-    return ! hooks_.empty();
+    return !hooks_.empty();
   }
 
   /// Returns all installed hooks.
@@ -163,6 +167,29 @@ public:
   /// @note Blocks the caller until `nid` responded to the lookup
   ///       or an error occurred.
   strong_actor_ptr remote_lookup(atom_value name, const node_id& nid);
+
+  /// @experimental
+  template <class Handle>
+  expected<Handle>
+  remote_spawn(const node_id& nid, std::string name, message args,
+               duration timeout = duration(time_unit::minutes, 1)) {
+    if (!nid || name.empty())
+      return sec::invalid_argument;
+    auto res = remote_spawn_impl(nid, name, args,
+                                 system().message_types<Handle>(), timeout);
+    if (!res)
+      return std::move(res.error());
+    return actor_cast<Handle>(std::move(*res));
+  }
+
+  /// @experimental
+  template <class Handle, class Rep, class Period>
+  expected<Handle> remote_spawn(const node_id& nid, std::string name,
+                                message args,
+                                std::chrono::duration<Rep, Period> timeout) {
+    return remote_spawn<Handle>(nid, std::move(name), std::move(args),
+                                duration{timeout});
+  }
 
   /// Smart pointer for `network::multiplexer`.
   using backend_pointer = std::unique_ptr<network::multiplexer>;
@@ -201,15 +228,26 @@ public:
                                        std::forward<Ts>(xs)...);
   }
 
-  /// Spawns a new broker as server running on given `port`
-  /// or an `error`.
+  /// Spawns a new broker as server running on given `port`.
   /// @warning Blocks the caller until the server socket is initialized.
   template <spawn_options Os = no_spawn_options,
             class F = std::function<void(broker*)>, class... Ts>
   expected<typename infer_handle_from_fun<F>::type>
-  spawn_server(F fun, uint16_t port, Ts&&... xs) {
+  spawn_server(F fun, uint16_t& port, Ts&&... xs) {
     using impl = typename infer_handle_from_fun<F>::impl;
     return spawn_server_impl<Os, impl>(std::move(fun), port,
+                                       std::forward<Ts>(xs)...);
+  }
+
+  /// Spawns a new broker as server running on given `port`.
+  /// @warning Blocks the caller until the server socket is initialized.
+  template <spawn_options Os = no_spawn_options,
+            class F = std::function<void(broker*)>, class... Ts>
+  expected<typename infer_handle_from_fun<F>::type>
+  spawn_server(F fun, const uint16_t& port, Ts&&... xs) {
+    uint16_t dummy = port;
+    using impl = typename infer_handle_from_fun<F>::impl;
+    return spawn_server_impl<Os, impl>(std::move(fun), dummy,
                                        std::forward<Ts>(xs)...);
   }
 
@@ -236,14 +274,14 @@ public:
   }
 
 protected:
-  middleman(actor_system& ref);
+  middleman(actor_system& sys);
 
 private:
   template <spawn_options Os, class Impl, class F, class... Ts>
   expected<typename infer_handle_from_class<Impl>::type>
   spawn_client_impl(F fun, const std::string& host, uint16_t port, Ts&&... xs) {
     auto ehdl = backend().new_tcp_scribe(host, port);
-    if (! ehdl)
+    if (!ehdl)
       return ehdl.error();
     auto hdl = *ehdl;
     detail::init_fun_factory<Impl, F> fac;
@@ -258,13 +296,14 @@ private:
 
   template <spawn_options Os, class Impl, class F, class... Ts>
   expected<typename infer_handle_from_class<Impl>::type>
-  spawn_server_impl(F fun, uint16_t port, Ts&&... xs) {
+  spawn_server_impl(F fun, uint16_t& port, Ts&&... xs) {
     detail::init_fun_factory<Impl, F> fac;
     auto init_fun = fac(std::move(fun), std::forward<Ts>(xs)...);
     auto ehdl = backend().new_tcp_doorman(port);
-    if (! ehdl)
+    if (!ehdl)
       return ehdl.error();
     auto hdl = ehdl->first;
+    port = ehdl->second;
     actor_config cfg{&backend()};
     cfg.init_fun = [hdl, init_fun](local_actor* ptr) -> behavior {
       static_cast<abstract_broker*>(ptr)->assign_tcp_doorman(hdl);
@@ -273,9 +312,15 @@ private:
     return system().spawn_class<Impl, Os>(cfg);
   }
 
+  expected<strong_actor_ptr> remote_spawn_impl(const node_id& nid,
+                                               std::string& name, message& args,
+                                               std::set<std::string> s,
+                                               duration timeout);
+
   expected<uint16_t> publish(const strong_actor_ptr& whom,
                              std::set<std::string> sigs,
-                             uint16_t port, const char* in, bool ru);
+                             uint16_t port, const char* cstr, bool ru);
+
 
   expected<void> unpublish(const actor_addr& whom, uint16_t port);
 

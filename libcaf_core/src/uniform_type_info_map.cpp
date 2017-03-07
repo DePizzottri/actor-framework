@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -36,6 +36,7 @@
 #include "caf/logger.hpp"
 #include "caf/message.hpp"
 #include "caf/duration.hpp"
+#include "caf/timestamp.hpp"
 #include "caf/actor_cast.hpp"
 #include "caf/actor_system.hpp"
 #include "caf/actor_factory.hpp"
@@ -60,6 +61,7 @@ const char* numbered_type_names[] = {
   "@charbuf",
   "@down",
   "@duration",
+  "@timestamp",
   "@error",
   "@exit",
   "@group",
@@ -77,7 +79,6 @@ const char* numbered_type_names[] = {
   "@strong_actor_ptr",
   "@strset",
   "@strvec",
-  "@sync_timeout_msg",
   "@timeout",
   "@u16",
   "@u16str",
@@ -146,34 +147,13 @@ uniform_type_info_map::portable_name(uint16_t nr,
                                      const std::type_info* ti) const {
   if (nr != 0)
     return &builtin_names_[nr - 1];
-  if (! ti)
+  if (ti == nullptr)
     return nullptr;
   auto& custom_names = system().config().type_names_by_rtti;
   auto i = custom_names.find(std::type_index(*ti));
   if (i != custom_names.end())
     return &(i->second);
   return nullptr;
-}
-
-uniform_type_info_map::error_renderer
-uniform_type_info_map::renderer(atom_value x) const {
-  auto& error_renderers = system().config().error_renderers;
-  auto i = error_renderers.find(x);
-  if (i != error_renderers.end())
-    return i->second;
-  return nullptr;
-}
-
-actor_factory_result uniform_type_info_map::make_actor(const std::string& name,
-                                                       actor_config& cfg,
-                                                       message& msg) const {
-  strong_actor_ptr res;
-  std::set<std::string> ifs;
-  auto& factories = system().config().actor_factories;
-  auto i = factories.find(name);
-  if (i != factories.end())
-    std::tie(res, ifs) = i->second(cfg, msg);
-  return std::make_pair(std::move(res), std::move(ifs));
 }
 
 uniform_type_info_map::uniform_type_info_map(actor_system& sys) : system_(sys) {

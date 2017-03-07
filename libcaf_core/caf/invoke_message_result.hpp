@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -28,7 +28,7 @@ enum invoke_message_result {
   im_dropped
 };
 
-constexpr const char* to_string(invoke_message_result x) {
+inline std::string to_string(invoke_message_result x) {
   return x == im_success ? "im_success"
                          : (x == im_skipped ? "im_skipped" : "im_dropped" );
 }

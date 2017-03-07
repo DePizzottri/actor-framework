@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -21,6 +21,7 @@
 #define CAF_COMPOSABLE_STATE_BASED_ACTOR_HPP
 
 #include "caf/stateful_actor.hpp"
+#include "caf/message_handler.hpp"
 
 namespace caf {
 
@@ -28,7 +29,7 @@ namespace caf {
 template <class State, class Base = typename State::actor_base>
 class composable_behavior_based_actor : public stateful_actor<State, Base> {
  public:
-  static_assert(! std::is_abstract<State>::value,
+  static_assert(!std::is_abstract<State>::value,
                 "State is abstract, please make sure to override all "
                 "virtual operator() member functions");
 
@@ -42,7 +43,7 @@ class composable_behavior_based_actor : public stateful_actor<State, Base> {
 
   behavior_type make_behavior() override {
     this->state.init_selfptr(this);
-    behavior tmp;
+    message_handler tmp;
     this->state.init_behavior(tmp);
     return behavior_type{typename behavior_type::unsafe_init{}, std::move(tmp)};
   }

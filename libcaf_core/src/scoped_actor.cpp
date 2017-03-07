@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,6 +19,7 @@
 
 #include "caf/scoped_actor.hpp"
 
+#include "caf/to_string.hpp"
 #include "caf/spawn_options.hpp"
 #include "caf/actor_registry.hpp"
 #include "caf/scoped_execution_unit.hpp"
@@ -30,7 +31,7 @@ namespace {
 class impl : public blocking_actor {
 public:
   impl(actor_config& cfg) : blocking_actor(cfg) {
-    is_detached(true);
+    setf(is_detached_flag);
   }
 
   void act() override {
@@ -45,24 +46,23 @@ public:
 } // namespace <anonymous>
 
 scoped_actor::scoped_actor(actor_system& sys, bool hide) : context_(&sys) {
+  CAF_SET_LOGGER_SYS(&sys);
   actor_config cfg{&context_};
   self_ = make_actor<impl, strong_actor_ptr>(sys.next_actor_id(), sys.node(),
                                              &sys, cfg);
-  if (! hide)
-    prev_ = CAF_SET_AID(self_->id());
-  CAF_LOG_TRACE(CAF_ARG(hide));
-  ptr()->is_registered(! hide);
+  if (!hide)
+    ptr()->register_at_system();
+  prev_ = CAF_SET_AID(self_->id());
+  ptr()->initialize();
 }
 
 scoped_actor::~scoped_actor() {
-  CAF_LOG_TRACE("");
-  if (! self_)
+  if (!self_)
     return;
   auto x = ptr();
-  if (x->is_registered())
-    CAF_SET_AID(prev_);
-  if (! x->is_terminated())
+  if (!x->getf(abstract_actor::is_terminated_flag))
     x->cleanup(exit_reason::normal, &context_);
+  CAF_SET_AID(prev_);
 }
 
 blocking_actor* scoped_actor::ptr() const {

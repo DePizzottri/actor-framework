@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -32,8 +32,11 @@ template <class> class optional;
 template <class> class expected;
 template <class> class intrusive_ptr;
 template <class> class behavior_type_of;
+template <class> class trivial_match_case;
 template <class> class weak_intrusive_ptr;
 template <class> class typed_continue_helper;
+
+template <class> struct timeout_definition;
 
 // -- 3 param templates --------------------------------------------------------
 
@@ -44,6 +47,7 @@ template <class, class, int> class actor_cast_access;
 template <class...> class result;
 template <class...> class delegated;
 template <class...> class typed_actor;
+template <class...> class typed_actor_pointer;
 template <class...> class typed_response_promise;
 template <class...> class typed_event_based_actor;
 
@@ -76,11 +80,11 @@ class actor_registry;
 class blocking_actor;
 class execution_unit;
 class proxy_registry;
+class actor_companion;
 class continue_helper;
 class mailbox_element;
 class message_handler;
 class scheduled_actor;
-class sync_timeout_msg;
 class response_promise;
 class event_based_actor;
 class type_erased_tuple;
@@ -93,8 +97,8 @@ class forwarding_actor_proxy;
 // -- structs ------------------------------------------------------------------
 
 struct unit_t;
-class exit_msg;
-class down_msg;
+struct exit_msg;
+struct down_msg;
 struct timeout_msg;
 struct group_down_msg;
 struct invalid_actor_t;

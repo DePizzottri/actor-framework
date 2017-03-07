@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -28,8 +28,10 @@
 
 #include "caf/fwd.hpp"
 #include "caf/atom.hpp"
+#include "caf/timestamp.hpp"
 
 #include "caf/detail/type_list.hpp"
+#include "caf/detail/squashed_int.hpp"
 
 namespace caf {
 
@@ -45,6 +47,7 @@ using sorted_builtin_types =
     std::vector<char>,                  // @charbuf
     down_msg,                           // @down
     duration,                           // @duration
+    timestamp,                          // @timestamp
     error,                              // @error
     exit_msg,                           // @exit
     group,                              // @group
@@ -62,7 +65,6 @@ using sorted_builtin_types =
     strong_actor_ptr,                   // @strong_actor_ptr
     std::set<std::string>,              // @strset
     std::vector<std::string>,           // @strvec
-    sync_timeout_msg,                   // @sync_timeout_msg
     timeout_msg,                        // @timeout
     uint16_t,                           // @u16
     std::u16string,                     // @u16_str
@@ -77,20 +79,6 @@ using sorted_builtin_types =
     float                               // float
   >;
 
-/// Compile-time list of integer types types.
-using int_types_by_size =
-  detail::type_list<                      // bytes
-    void,                                 // 0
-    detail::type_pair<int8_t, uint8_t>,   // 1
-    detail::type_pair<int16_t, uint16_t>, // 2
-    void,                                 // 3
-    detail::type_pair<int32_t, uint32_t>, // 4
-    void,                                 // 5
-    void,                                 // 6
-    void,                                 // 7
-    detail::type_pair<int64_t, uint64_t>  // 8
-  >;
-
 /// Computes the type number for `T`.
 template <class T, bool IsIntegral = std::is_integral<T>::value>
 struct type_nr {
@@ -100,13 +88,7 @@ struct type_nr {
 
 template <class T>
 struct type_nr<T, true> {
-  using tpair = typename detail::tl_at<int_types_by_size, sizeof(T)>::type;
-  using type =
-    typename std::conditional<
-      std::is_signed<T>::value,
-      typename tpair::first,
-      typename tpair::second
-    >::type;
+  using type = detail::squashed_int_t<T>;
   static constexpr uint16_t value = static_cast<uint16_t>(
     detail::tl_index_of<sorted_builtin_types, type>::value + 1);
 };

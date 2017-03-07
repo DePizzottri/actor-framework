@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -77,7 +77,7 @@ public:
 
   std::pair<bool, size_t> add_subscriber(strong_actor_ptr who) {
     CAF_LOG_TRACE(CAF_ARG(who));
-    if (! who)
+    if (!who)
       return {false, subscribers_.size()};
     exclusive_guard guard(mtx_);
     auto res = subscribers_.emplace(std::move(who)).second;
@@ -100,9 +100,7 @@ public:
 
   bool subscribe(strong_actor_ptr who) override {
     CAF_LOG_TRACE(CAF_ARG(who));
-    if (add_subscriber(std::move(who)).first)
-      return true;
-    return false;
+    return add_subscriber(std::move(who)).first;
   }
 
   void unsubscribe(const actor_control_block* who) override {
@@ -122,9 +120,9 @@ public:
   }
 
   local_group(local_group_module& mod, std::string id, node_id nid,
-              optional<actor> local_broker);
+              optional<actor> lb);
 
-  ~local_group();
+  ~local_group() override;
 
 protected:
   detail::shared_spinlock mtx_;
@@ -224,9 +222,9 @@ public:
     CAF_LOG_TRACE("");
   }
 
-  behavior make_behavior();
+  behavior make_behavior() override;
 
-  void on_exit() {
+  void on_exit() override {
     group_.reset();
   }
 
@@ -327,12 +325,12 @@ public:
     CAF_LOG_TRACE("");
   }
 
-  group get(const std::string& identifier) override {
+  expected<group> get(const std::string& identifier) override {
     CAF_LOG_TRACE(CAF_ARG(identifier));
     upgrade_guard guard(instances_mtx_);
     auto i = instances_.find(identifier);
     if (i != instances_.end())
-      return {i->second};
+      return group{i->second};
     auto tmp = make_counted<local_group>(*this, identifier,
                                          system().node(), none);
     upgrade_to_unique_guard uguard(guard);
@@ -342,7 +340,7 @@ public:
     // someone might preempt us
     if (result != tmp)
       tmp->stop();
-    return {result};
+    return group{result};
   }
 
   error load(deserializer& source, group& storage) override {
@@ -350,22 +348,24 @@ public:
     // deserialize identifier and broker
     std::string identifier;
     strong_actor_ptr broker_ptr;
-    source >> identifier >> broker_ptr;
+    auto e = source(identifier, broker_ptr);
+    if (e)
+      return e;
     CAF_LOG_DEBUG(CAF_ARG(identifier) << CAF_ARG(broker_ptr));
-    if (! broker_ptr) {
+    if (!broker_ptr) {
       storage = invalid_group;
-      return {};
+      return none;
     }
     auto broker = actor_cast<actor>(broker_ptr);
     if (broker->node() == system().node()) {
-      storage = this->get(identifier);
-      return {};
+      storage = *this->get(identifier);
+      return none;
     }
     upgrade_guard guard(proxies_mtx_);
     auto i = proxies_.find(broker);
     if (i != proxies_.end()) {
       storage = group{i->second};
-      return {};
+      return none;
     }
     local_group_ptr tmp = make_counted<local_group_proxy>(system(), broker,
                                                           *this, identifier,
@@ -374,15 +374,15 @@ public:
     auto p = proxies_.emplace(broker, tmp);
     // someone might preempt us
     storage = group{p.first->second};
-    return {};
+    return none;
   }
 
   error save(const local_group* ptr, serializer& sink) const {
     CAF_ASSERT(ptr != nullptr);
     CAF_LOG_TRACE("");
-    sink << ptr->identifier() << actor_cast<strong_actor_ptr>(ptr->broker());
-    // TODO: refactor after visit API is in place (#470)
-    return {};
+    auto bro = actor_cast<strong_actor_ptr>(ptr->broker());
+    auto& id = const_cast<std::string&>(ptr->identifier());
+    return sink(id, bro);
   }
 
   void stop() override {
@@ -423,9 +423,7 @@ error local_group::save(serializer& sink) const {
   CAF_LOG_TRACE("");
   // this cast is safe, because the only available constructor accepts
   // local_group_module* as module pointer
-  static_cast<local_group_module&>(parent_).save(this, sink);
-  // TODO: refactor after visit API is in place (#470)
-  return {};
+  return static_cast<local_group_module&>(parent_).save(this, sink);
 }
 
 std::atomic<size_t> s_ad_hoc_id;
@@ -465,7 +463,20 @@ group group_manager::anonymous() const {
   CAF_LOG_TRACE("");
   std::string id = "__#";
   id += std::to_string(++s_ad_hoc_id);
-  return get_module("local")->get(id);
+  // local module is guaranteed to not return an error
+  return *get_module("local")->get(id);
+}
+
+expected<group> group_manager::get(std::string group_uri) const {
+  CAF_LOG_TRACE(CAF_ARG(group_uri));
+  // URI parsing is pretty much a brute-force approach, no actual validation yet
+  auto p = group_uri.find(':');
+  if (p == std::string::npos)
+    return sec::invalid_argument;
+  auto group_id = group_uri.substr(p + 1);
+  // erase all but the scheme part from the URI and use that as module name
+  group_uri.erase(p);
+  return get(group_uri, group_id);
 }
 
 expected<group> group_manager::get(const std::string& module_name,
@@ -474,9 +485,9 @@ expected<group> group_manager::get(const std::string& module_name,
   auto mod = get_module(module_name);
   if (mod)
     return mod->get(group_identifier);
-  std::string error_msg = "no module named \"";
+  std::string error_msg = R"(no module named ")";
   error_msg += module_name;
-  error_msg += "\" found";
+  error_msg += R"(" found)";
   return make_error(sec::no_such_group_module, std::move(error_msg));
 }
 

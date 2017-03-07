@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -36,8 +36,8 @@ manager::~manager() {
 }
 
 void manager::set_parent(abstract_broker* ptr) {
-  if (! detached())
-    parent_ = ptr ? ptr->ctrl() : nullptr;
+  if (!detached())
+    parent_ = ptr != nullptr ? ptr->ctrl() : nullptr;
 }
 
 abstract_broker* manager::parent() {
@@ -46,7 +46,7 @@ abstract_broker* manager::parent() {
 
 void manager::detach(execution_unit*, bool invoke_disconnect_message) {
   CAF_LOG_TRACE("");
-  if (! detached()) {
+  if (!detached()) {
     CAF_LOG_DEBUG("disconnect servant from broker");
     auto raw_ptr = parent();
     // keep the strong reference until we go out of scope
@@ -56,8 +56,17 @@ void manager::detach(execution_unit*, bool invoke_disconnect_message) {
     if (invoke_disconnect_message) {
       auto mptr = make_mailbox_element(nullptr, invalid_message_id,
                                        {}, detach_message());
-      if (raw_ptr->consume(*mptr) == im_skipped)
-        raw_ptr->push_to_cache(std::move(mptr));
+      switch (raw_ptr->consume(*mptr)) {
+        case im_success:
+          raw_ptr->finalize();
+          break;
+        case im_skipped:
+          raw_ptr->push_to_cache(std::move(mptr));
+          break;
+        case im_dropped:
+          CAF_LOG_INFO("broker dropped disconnect message");
+          break;
+      }
     }
   }
 }

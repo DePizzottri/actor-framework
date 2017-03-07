@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -28,7 +28,6 @@
 #include "caf/type_nr.hpp"
 
 #include "caf/detail/type_list.hpp"
-#include "caf/detail/pseudo_tuple.hpp"
 
 namespace caf {
 namespace detail {
@@ -61,8 +60,7 @@ struct meta_element_factory<T, 0> {
 template <atom_value V>
 struct meta_element_factory<atom_constant<V>, type_nr<atom_value>::value> {
   static meta_element create() {
-    return {V, type_nr<atom_value>::value,
-            nullptr, match_atom_constant};
+    return {V, type_nr<atom_value>::value, nullptr, match_atom_constant};
   }
 };
 
@@ -77,8 +75,8 @@ struct meta_elements<type_list<Ts...>> {
   }
 };
 
-bool try_match(const type_erased_tuple& xs, const meta_element* pattern_begin,
-               size_t pattern_size);
+bool try_match(const type_erased_tuple& xs, const meta_element* iter,
+               size_t ps);
 
 } // namespace detail
 } // namespace caf

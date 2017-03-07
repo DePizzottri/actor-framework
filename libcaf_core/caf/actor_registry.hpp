@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -33,7 +33,6 @@
 #include "caf/actor_control_block.hpp"
 
 #include "caf/detail/shared_spinlock.hpp"
-#include "caf/detail/singleton_mixin.hpp"
 
 namespace caf {
 
@@ -53,7 +52,7 @@ public:
   strong_actor_ptr get(actor_id key) const;
 
   /// Associates a local actor with its ID.
-  void put(actor_id key, strong_actor_ptr value);
+  void put(actor_id key, strong_actor_ptr val);
 
   /// Removes an actor from this registry,
   /// leaving `reason` for future reference.

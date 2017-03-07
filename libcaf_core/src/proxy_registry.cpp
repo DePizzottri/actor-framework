@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -62,7 +62,7 @@ strong_actor_ptr proxy_registry::get(const key_type& node, actor_id aid) {
 strong_actor_ptr proxy_registry::get_or_put(const key_type& nid, actor_id aid) {
   CAF_LOG_TRACE(CAF_ARG(nid) << CAF_ARG(aid));
   auto& result = proxies_[nid][aid];
-  if (! result)
+  if (!result)
     result = backend_.make_proxy(nid, aid);
   return result;
 }
@@ -98,7 +98,7 @@ void proxy_registry::erase(const key_type& inf, actor_id aid, error rsn) {
     auto j = submap.find(aid);
     if (j == submap.end())
       return;
-    kill_proxy(j->second, rsn);
+    kill_proxy(j->second, std::move(rsn));
     submap.erase(j);
     if (submap.empty())
       proxies_.erase(i);
@@ -113,10 +113,10 @@ void proxy_registry::clear() {
 }
 
 void proxy_registry::kill_proxy(strong_actor_ptr& ptr, error rsn) {
-  if (! ptr)
+  if (!ptr)
     return;
   auto pptr = static_cast<actor_proxy*>(actor_cast<abstract_actor*>(ptr));
-  pptr->kill_proxy(backend_.registry_context(), rsn);
+  pptr->kill_proxy(backend_.registry_context(), std::move(rsn));
 }
 
 } // namespace caf

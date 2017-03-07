@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -41,13 +41,12 @@ optional<routing_table::route> routing_table::lookup(const node_id& target) {
   auto i = indirect_.find(target);
   if (i != indirect_.end()) {
     auto& hops = i->second;
-    while (! hops.empty()) {
+    while (!hops.empty()) {
       auto& hop = *hops.begin();
       hdl = lookup_direct(hop);
       if (hdl != invalid_connection_handle)
         return route{parent_->wr_buf(hdl), hop, hdl};
-      else
-        hops.erase(hops.begin());
+      hops.erase(hops.begin());
     }
   }
   return none;
@@ -58,7 +57,7 @@ void routing_table::flush(const route& r) {
 }
 
 node_id routing_table::lookup_direct(const connection_handle& hdl) const {
-  return get_opt(direct_by_hdl_, hdl, invalid_node_id);
+  return get_opt(direct_by_hdl_, hdl, none);
 }
 
 connection_handle routing_table::lookup_direct(const node_id& nid) const {
@@ -68,9 +67,9 @@ connection_handle routing_table::lookup_direct(const node_id& nid) const {
 node_id routing_table::lookup_indirect(const node_id& nid) const {
   auto i = indirect_.find(nid);
   if (i == indirect_.end())
-    return invalid_node_id;
+    return none;
   if (i->second.empty())
-    return invalid_node_id;
+    return none;
   return *i->second.begin();
 }
 

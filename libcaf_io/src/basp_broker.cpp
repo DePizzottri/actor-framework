@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -52,7 +52,7 @@ basp_broker_state::basp_broker_state(broker* selfptr)
                              static_cast<proxy_registry::backend&>(*this)),
       self(selfptr),
       instance(selfptr, *this) {
-  CAF_ASSERT(this_node() != invalid_node_id);
+  CAF_ASSERT(this_node() != none);
 }
 
 basp_broker_state::~basp_broker_state() {
@@ -64,7 +64,7 @@ basp_broker_state::~basp_broker_state() {
 strong_actor_ptr basp_broker_state::make_proxy(node_id nid, actor_id aid) {
   CAF_LOG_TRACE(CAF_ARG(nid) << CAF_ARG(aid));
   CAF_ASSERT(nid != this_node());
-  if (nid == invalid_node_id || aid == invalid_actor_id)
+  if (nid == none || aid == invalid_actor_id)
     return nullptr;
   // this member function is being called whenever we deserialize a
   // payload received from a remote node; if a remote node A sends
@@ -76,7 +76,7 @@ strong_actor_ptr basp_broker_state::make_proxy(node_id nid, actor_id aid) {
   // we need to tell remote side we are watching this actor now;
   // use a direct route if possible, i.e., when talking to a third node
   auto path = instance.tbl().lookup(nid);
-  if (! path) {
+  if (!path) {
     // this happens if and only if we don't have a path to `nid`
     // and current_context_->hdl has been blacklisted
     CAF_LOG_INFO("cannot create a proxy instance for an actor "
@@ -88,7 +88,7 @@ strong_actor_ptr basp_broker_state::make_proxy(node_id nid, actor_id aid) {
   auto mm = &system().middleman();
   actor_config cfg;
   auto res = make_actor<forwarding_actor_proxy, strong_actor_ptr>(
-    aid, nid, &(self->home_system()), cfg, self);
+        aid, nid, &(self->home_system()), cfg, self);
   strong_actor_ptr selfptr{self->ctrl()};
   res->get()->attach_functor([=](const error& rsn) {
     mm->backend().post([=] {
@@ -96,7 +96,7 @@ strong_actor_ptr basp_broker_state::make_proxy(node_id nid, actor_id aid) {
       // until the original instance terminates, thus preventing subtle
       // bugs with attachables
       auto bptr = static_cast<basp_broker*>(selfptr->get());
-      if (! bptr->is_terminated())
+      if (!bptr->getf(abstract_actor::is_terminated_flag))
         bptr->state.proxies().erase(nid, res->id(), rsn);
     });
   });
@@ -121,7 +121,7 @@ void basp_broker_state::finalize_handshake(const node_id& nid, actor_id aid,
   CAF_ASSERT(this_context != nullptr);
   this_context->id = nid;
   auto& cb = this_context->callback;
-  if (! cb)
+  if (!cb)
     return;
   auto cleanup = detail::make_scope_guard([&] {
     cb = none;
@@ -129,18 +129,18 @@ void basp_broker_state::finalize_handshake(const node_id& nid, actor_id aid,
   strong_actor_ptr ptr;
   if (aid == invalid_actor_id) {
     // can occur when connecting to the default port of a node
-    cb->deliver(ok_atom::value, nid, ptr, std::move(sigs));
+    cb->deliver(nid, ptr, std::move(sigs));
     return;
   }
   if (nid == this_node()) {
     // connected to self
     ptr = actor_cast<strong_actor_ptr>(system().registry().get(aid));
-    CAF_LOG_INFO_IF(! ptr, "actor not found:" << CAF_ARG(aid));
+    CAF_LOG_INFO_IF(!ptr, "actor not found:" << CAF_ARG(aid));
   } else {
     ptr = namespace_.get_or_put(nid, aid);
-    CAF_LOG_ERROR_IF(! ptr, "creating actor in finalize_handshake failed");
+    CAF_LOG_ERROR_IF(!ptr, "creating actor in finalize_handshake failed");
   }
-  cb->deliver(make_message(ok_atom::value, nid, ptr, std::move(sigs)));
+  cb->deliver(make_message(nid, ptr, std::move(sigs)));
   this_context->callback = none;
 }
 
@@ -166,10 +166,10 @@ void basp_broker_state::proxy_announced(const node_id& nid, actor_id aid) {
   // source node has created a proxy for one of our actors
   auto entry = system().registry().get(aid);
   auto send_kill_proxy_instance = [=](error rsn) {
-    if (! rsn)
+    if (!rsn)
       rsn = exit_reason::unknown;
     auto path = instance.tbl().lookup(nid);
-    if (! path) {
+    if (!path) {
       CAF_LOG_INFO("cannot send exit message for proxy, no route to host:"
                    << CAF_ARG(nid));
       return;
@@ -179,7 +179,7 @@ void basp_broker_state::proxy_announced(const node_id& nid, actor_id aid) {
     instance.tbl().flush(*path);
   };
   auto ptr = actor_cast<strong_actor_ptr>(entry);
-  if (! ptr) {
+  if (!ptr) {
     CAF_LOG_DEBUG("kill proxy immediately");
     // kill immediately if actor has already terminated
     send_kill_proxy_instance(exit_reason::unknown);
@@ -192,7 +192,7 @@ void basp_broker_state::proxy_announced(const node_id& nid, actor_id aid) {
         auto bptr = static_cast<basp_broker*>(tmp->get());
         // ... to make sure this is safe
         if (bptr == mm->named_broker<basp_broker>(atom("BASP"))
-            && ! bptr->is_terminated())
+            && !bptr->getf(abstract_actor::is_terminated_flag))
           send_kill_proxy_instance(fail_state);
       });
     });
@@ -233,7 +233,51 @@ void basp_broker_state::deliver(const node_id& src_nid, actor_id src_aid,
                 << CAF_ARG(msg) << CAF_ARG(mid));
   auto src = src_nid == this_node() ? system().registry().get(src_aid)
                                     : proxies().get_or_put(src_nid, src_aid);
-  if (! dest) {
+  // Intercept link messages. Forwarding actor proxies signalize linking
+  // by sending link_atom/unlink_atom message with src = dest.
+  if (msg.type_token() == make_type_token<atom_value, strong_actor_ptr>()) {
+    switch (static_cast<uint64_t>(msg.get_as<atom_value>(0))) {
+      default:
+        break;
+      case link_atom::value.uint_value(): {
+        if (src_nid != this_node()) {
+          CAF_LOG_WARNING("received link message for an other node");
+          return;
+        }
+        auto ptr = msg.get_as<strong_actor_ptr>(1);
+        if (!ptr) {
+          CAF_LOG_WARNING("received link message with invalid target");
+          return;
+        }
+        if (!src) {
+          CAF_LOG_DEBUG("received link for invalid actor, report error");
+          anon_send(actor_cast<actor>(ptr),
+                    make_error(sec::remote_linking_failed));
+          return;
+        }
+        static_cast<actor_proxy*>(ptr->get())->local_link_to(src->get());
+        return;
+      }
+      case unlink_atom::value.uint_value(): {
+        if (src_nid != this_node()) {
+          CAF_LOG_WARNING("received unlink message for an other node");
+          return;
+        }
+        const auto& ptr = msg.get_as<strong_actor_ptr>(1);
+        if (!ptr) {
+          CAF_LOG_DEBUG("received unlink message with invalid target");
+          return;
+        }
+        if (!src) {
+          CAF_LOG_DEBUG("received unlink for invalid actor, report error");
+          return;
+        }
+        static_cast<actor_proxy*>(ptr->get())->local_unlink_from(src->get());
+        return;
+      }
+    }
+  }
+  if (!dest) {
     auto rsn = exit_reason::remote_link_unreachable;
     CAF_LOG_INFO("cannot deliver message, destination not found");
     self->parent().notify<hook::invalid_message_received>(src_nid, src,
@@ -272,12 +316,12 @@ void basp_broker_state::learned_new_node(const node_id& nid) {
         CAF_LOG_TRACE(CAF_ARG(config_serv));
         // drop unexpected messages from this point on
         tself->set_default_handler(print_and_drop);
-        if (! config_serv)
+        if (!config_serv)
           return;
         tself->monitor(config_serv);
         tself->become(
           [=](spawn_atom, std::string& type, message& args)
-          -> delegated<ok_atom, strong_actor_ptr, std::set<std::string>> {
+          -> delegated<strong_actor_ptr, std::set<std::string>> {
             CAF_LOG_TRACE(CAF_ARG(type) << CAF_ARG(args));
             tself->delegate(actor_cast<actor>(std::move(config_serv)),
                                  get_atom::value, std::move(type),
@@ -295,14 +339,14 @@ void basp_broker_state::learned_new_node(const node_id& nid) {
   spawn_servers.emplace(nid, tmp);
   using namespace detail;
   system().registry().put(tmp.id(), actor_cast<strong_actor_ptr>(tmp));
-  auto writer = make_callback([](serializer& sink) {
+  auto writer = make_callback([](serializer& sink) -> error {
     auto name_atm = atom("SpawnServ");
     std::vector<actor_id> stages;
     auto msg = make_message(sys_atom::value, get_atom::value, "info");
-    sink << name_atm << stages << msg;
+    return sink(name_atm, stages, msg);
   });
   auto path = instance.tbl().lookup(nid);
-  if (! path) {
+  if (!path) {
     CAF_LOG_ERROR("learned_new_node called, but no route to nid");
     return;
   }
@@ -313,13 +357,6 @@ void basp_broker_state::learned_new_node(const node_id& nid) {
   // writing std::numeric_limits<actor_id>::max() is a hack to get
   // this send-to-named-actor feature working with older CAF releases
   instance.write(self->context(), path->wr_buf, hdr, &writer);
-  /*
-                 basp::message_type::dispatch_message,
-                 nullptr, static_cast<uint64_t>(atom("SpawnServ")),
-                 this_node(), nid,
-                 tmp.id(), std::numeric_limits<actor_id>::max(),
-                 &writer);
-  */
   instance.flush(*path);
 }
 
@@ -327,7 +364,7 @@ void basp_broker_state::learned_new_node_directly(const node_id& nid,
                                                   bool was_indirectly_before) {
   CAF_ASSERT(this_context != nullptr);
   CAF_LOG_TRACE(CAF_ARG(nid));
-  if (! was_indirectly_before)
+  if (!was_indirectly_before)
     learned_new_node(nid);
 }
 
@@ -335,7 +372,7 @@ void basp_broker_state::learned_new_node_indirectly(const node_id& nid) {
   CAF_ASSERT(this_context != nullptr);
   CAF_LOG_TRACE(CAF_ARG(nid));
   learned_new_node(nid);
-  if (! enable_automatic_connections)
+  if (!enable_automatic_connections)
     return;
   // this member function gets only called once, after adding a new
   // indirect connection to the routing table; hence, spawning
@@ -350,7 +387,7 @@ void basp_broker_state::learned_new_node_indirectly(const node_id& nid) {
     });
     return {
       // this config is send from the remote `ConfigServ`
-      [=](ok_atom, const std::string&, message& msg) {
+      [=](const std::string&, message& msg) {
         CAF_LOG_TRACE(CAF_ARG(msg));
         CAF_LOG_DEBUG("received requested config:" << CAF_ARG(msg));
         // whatever happens, we are done afterwards
@@ -385,7 +422,7 @@ void basp_broker_state::learned_new_node_indirectly(const node_id& nid) {
     };
   };
   auto path = instance.tbl().lookup(nid);
-  if (! path) {
+  if (!path) {
     CAF_LOG_ERROR("learned_new_node_indirectly called, but no route to nid");
     return;
   }
@@ -396,11 +433,11 @@ void basp_broker_state::learned_new_node_indirectly(const node_id& nid) {
   using namespace detail;
   auto tmp = system().spawn<detached + hidden>(connection_helper, self);
   system().registry().put(tmp.id(), actor_cast<strong_actor_ptr>(tmp));
-  auto writer = make_callback([](serializer& sink) {
+  auto writer = make_callback([](serializer& sink) -> error {
     auto name_atm = atom("ConfigServ");
     std::vector<actor_id> stages;
     auto msg = make_message(get_atom::value, "basp.default-connectivity");
-    sink << name_atm << stages << msg;
+    return sink(name_atm, stages, msg);
   });
   basp::header hdr{basp::message_type::dispatch_message,
                    basp::header::named_receiver_flag,
@@ -418,10 +455,10 @@ void basp_broker_state::set_context(connection_handle hdl) {
                     connection_context{
                       basp::await_header,
                       basp::header{basp::message_type::server_handshake, 0,
-                                   0, 0, invalid_node_id, invalid_node_id,
+                                   0, 0, none, none,
                                    invalid_actor_id, invalid_actor_id},
                       hdl,
-                      invalid_node_id,
+                      none,
                       0,
                       none}).first;
   }
@@ -472,10 +509,7 @@ behavior basp_broker::make_behavior() {
         if (ctx.callback) {
           CAF_LOG_WARNING("failed to handshake with remote node"
                           << CAF_ARG(msg.handle));
-          ctx.callback->deliver(ok_atom::value,
-                                node_id{invalid_node_id},
-                                strong_actor_ptr{nullptr},
-                                std::set<std::string>{});
+          ctx.callback->deliver(make_error(sec::disconnect_during_handshake));
         }
         close(msg.handle);
         state.ctx.erase(msg.handle);
@@ -493,14 +527,14 @@ behavior basp_broker::make_behavior() {
         strong_actor_ptr& dest, message_id mid, const message& msg) {
       CAF_LOG_TRACE(CAF_ARG(src) << CAF_ARG(dest)
                     << CAF_ARG(mid) << CAF_ARG(msg));
-      if (! dest || system().node() == dest->node()) {
+      if (!dest || system().node() == dest->node()) {
         CAF_LOG_WARNING("cannot forward to invalid or local actor:"
                         << CAF_ARG(dest));
         return;
       }
       if (src && system().node() == src->node())
         system().registry().put(src->id(), src);
-      if (! state.instance.dispatch(context(), src, fwd_stack,
+      if (!state.instance.dispatch(context(), src, fwd_stack,
                                     dest, mid, msg)
           && mid.is_request()) {
         detail::sync_request_bouncer srb{exit_reason::remote_link_unreachable};
@@ -508,33 +542,35 @@ behavior basp_broker::make_behavior() {
       }
     },
     // received from some system calls like whereis
-    [=](forward_atom, strong_actor_ptr& src,
-        const node_id& dest_node, atom_value dest_name,
-        const message& msg) -> result<void> {
+    [=](forward_atom, const node_id& dest_node, atom_value dest_name,
+        const message& msg) -> result<message> {
+      auto cme = current_mailbox_element();
+      if (cme == nullptr)
+        return sec::invalid_argument;
+      auto& src = cme->sender;
       CAF_LOG_TRACE(CAF_ARG(src)
                     << ", " << CAF_ARG(dest_node)
                     << ", " << CAF_ARG(dest_name)
                     << ", " << CAF_ARG(msg));
-      if (! src)
-        return sec::cannot_forward_to_invalid_actor;
+      if (!src)
+        return sec::invalid_argument;
       auto path = this->state.instance.tbl().lookup(dest_node);
-      if (! path) {
+      if (!path) {
         CAF_LOG_ERROR("no route to receiving node");
         return sec::no_route_to_receiving_node;
       }
       if (system().node() == src->node())
         system().registry().put(src->id(), src);
-      auto writer = make_callback([&](serializer& sink) {
-        std::vector<actor_addr> stages;
-        sink << dest_name << stages << msg;
+      auto writer = make_callback([&](serializer& sink) -> error {
+        return sink(dest_name, cme->stages, const_cast<message&>(msg));
       });
       basp::header hdr{basp::message_type::dispatch_message,
                        basp::header::named_receiver_flag,
-                       0, 0, state.this_node(), dest_node,
-                       src->id(), invalid_actor_id};
+                       0, cme->mid.integer_value(), state.this_node(),
+                       dest_node, src->id(), invalid_actor_id};
       state.instance.write(context(), path->wr_buf, hdr, &writer);
       state.instance.flush(*path);
-      return unit;
+      return delegated<message>();
     },
     // received from underlying broker implementation
     [=](const new_connection_msg& msg) {
@@ -555,8 +591,8 @@ behavior basp_broker::make_behavior() {
       auto nid = state.instance.tbl().lookup_direct(msg.handle);
       // tell BASP instance we've lost connection
       state.instance.handle_node_shutdown(nid);
-      CAF_ASSERT(nid == invalid_node_id
-                 || ! state.instance.tbl().reachable(nid));
+      CAF_ASSERT(nid == none
+                 || !state.instance.tbl().reachable(nid));
     },
     // received from underlying broker implementation
     [=](const acceptor_closed_msg& msg) {
@@ -572,37 +608,33 @@ behavior basp_broker::make_behavior() {
         CAF_LOG_WARNING("invalid handle");
         return;
       }
-      try {
-        assign_tcp_doorman(hdl);
+      auto res = assign_tcp_doorman(hdl);
+      if (res) {
+        if (whom)
+          system().registry().put(whom->id(), whom);
+        state.instance.add_published_actor(port, whom, std::move(sigs));
+      } else {
+        CAF_LOG_DEBUG("failed to assign doorman from handle"
+                      << CAF_ARG(whom));
       }
-      catch (...) {
-        CAF_LOG_DEBUG("failed to assign doorman from handle");
-        return;
-      }
-      if (whom)
-        system().registry().put(whom->id(), whom);
-      state.instance.add_published_actor(port, whom, std::move(sigs));
     },
     // received from middleman actor (delegated)
     [=](connect_atom, connection_handle hdl, uint16_t port) {
       CAF_LOG_TRACE(CAF_ARG(hdl.id()));
       auto rp = make_response_promise();
-      try {
-        assign_tcp_scribe(hdl);
+      auto res = assign_tcp_scribe(hdl);
+      if (res) {
+        auto& ctx = state.ctx[hdl];
+        ctx.hdl = hdl;
+        ctx.remote_port = port;
+        ctx.cstate = basp::await_header;
+        ctx.callback = rp;
+        // await server handshake
+        configure_read(hdl, receive_policy::exactly(basp::header_size));
+      } else {
+        CAF_LOG_DEBUG("failed to assign scribe from handle" << CAF_ARG(res));
+        rp.deliver(std::move(res.error()));
       }
-      catch (std::exception& e) {
-        CAF_LOG_DEBUG("failed to assign scribe from handle: " << e.what());
-        CAF_IGNORE_UNUSED(e);
-        rp.deliver(sec::failed_to_assign_scribe_from_handle);
-        return;
-      }
-      auto& ctx = state.ctx[hdl];
-      ctx.hdl = hdl;
-      ctx.remote_port = port;
-      ctx.cstate = basp::await_header;
-      ctx.callback = rp;
-      // await server handshake
-      configure_read(hdl, receive_policy::exactly(basp::header_size));
     },
     [=](delete_atom, const node_id& nid, actor_id aid) {
       CAF_LOG_TRACE(CAF_ARG(nid) << ", " << CAF_ARG(aid));
@@ -610,9 +642,9 @@ behavior basp_broker::make_behavior() {
     },
     [=](unpublish_atom, const actor_addr& whom, uint16_t port) -> result<void> {
       CAF_LOG_TRACE(CAF_ARG(whom) << CAF_ARG(port));
-      auto cb = make_callback([&](const strong_actor_ptr&, uint16_t x) {
-        try { close(hdl_by_port(x)); }
-        catch (std::exception&) { }
+      auto cb = make_callback([&](const strong_actor_ptr&, uint16_t x) -> error {
+        close(hdl_by_port(x));
+        return none;
       });
       if (state.instance.remove_published_actor(whom, port, &cb) == 0)
         return sec::no_actor_published_at_port;
@@ -624,25 +656,10 @@ behavior basp_broker::make_behavior() {
       // it is well-defined behavior to not have an actor published here,
       // hence the result can be ignored safely
       state.instance.remove_published_actor(port, nullptr);
-      try {
-        close(hdl_by_port(port));
-      }
-      catch (std::exception&) {
-        return sec::cannot_close_invalid_port;
-      }
-      return unit;
-    },
-    [=](spawn_atom, const node_id& nid, std::string& type, message& xs)
-    -> delegated<ok_atom, strong_actor_ptr, std::set<std::string>> {
-      CAF_LOG_TRACE(CAF_ARG(nid) << CAF_ARG(type) << CAF_ARG(xs));
-      auto i = state.spawn_servers.find(nid);
-      if (i == state.spawn_servers.end()) {
-        auto rp = make_response_promise();
-        rp.deliver(sec::no_route_to_receiving_node);
-      } else {
-        delegate(i->second, spawn_atom::value, std::move(type), std::move(xs));
-      }
-      return {};
+      auto res = close(hdl_by_port(port));
+      if (res)
+        return unit;
+      return sec::cannot_close_invalid_port;
     },
     [=](get_atom, const node_id& x)
     -> std::tuple<node_id, std::string, uint16_t> {

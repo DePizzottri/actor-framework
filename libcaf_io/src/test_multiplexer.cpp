@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -93,6 +93,14 @@ expected<void> test_multiplexer::assign_tcp_scribe(abstract_broker* ptr,
       return static_cast<uint16_t>(hdl().id());
     }
 
+    void add_to_loop() override {
+      mpx_->passive_mode(hdl()) = false;
+    }
+
+    void remove_from_loop() override {
+      mpx_->passive_mode(hdl()) = true;
+    }
+
   private:
     test_multiplexer* mpx_;
   };
@@ -114,7 +122,7 @@ expected<connection_handle>
 test_multiplexer::add_tcp_scribe(abstract_broker* ptr, const std::string& host,
                                  uint16_t desired_port) {
   auto hdl = new_tcp_scribe(host, desired_port);
-  if (! hdl)
+  if (!hdl)
     return std::move(hdl.error());
   assign_tcp_scribe(ptr, *hdl);
   return hdl;
@@ -141,14 +149,15 @@ expected<void> test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
       // nop
     }
 
-    void new_connection() override {
+    bool new_connection() override {
       auto& mm = mpx_->pending_connects();
       auto i = mm.find(hdl());
+      bool result = true;
       if (i != mm.end()) {
-        msg().handle = i->second;
-        invoke_mailbox_element(mpx_);
+        result = doorman::new_connection(mpx_, i->second);
         mm.erase(i);
       }
+      return result;
     }
 
     void stop_reading() override {
@@ -166,6 +175,14 @@ expected<void> test_multiplexer::assign_tcp_doorman(abstract_broker* ptr,
 
     uint16_t port() const override {
       return mpx_->port(hdl());
+    }
+
+    void add_to_loop() override {
+      mpx_->passive_mode(hdl()) = false;
+    }
+
+    void remove_from_loop() override {
+      mpx_->passive_mode(hdl()) = true;
     }
 
   private:
@@ -188,7 +205,7 @@ expected<std::pair<accept_handle, uint16_t>>
 test_multiplexer::add_tcp_doorman(abstract_broker* ptr, uint16_t prt,
                                   const char* in, bool reuse_addr) {
   auto result = new_tcp_doorman(prt, in, reuse_addr);
-  if (! result)
+  if (!result)
     return std::move(result.error());
   port(result->first) = prt;
   assign_tcp_doorman(ptr, result->first);
@@ -245,6 +262,10 @@ bool& test_multiplexer::stopped_reading(connection_handle hdl) {
   return scribe_data_[hdl].stopped_reading;
 }
 
+bool& test_multiplexer::passive_mode(connection_handle hdl) {
+  return scribe_data_[hdl].passive_mode;
+}
+
 intrusive_ptr<scribe>& test_multiplexer::impl_ptr(connection_handle hdl) {
   return scribe_data_[hdl].ptr;
 }
@@ -255,6 +276,10 @@ uint16_t& test_multiplexer::port(accept_handle hdl) {
 
 bool& test_multiplexer::stopped_reading(accept_handle hdl) {
   return doorman_data_[hdl].stopped_reading;
+}
+
+bool& test_multiplexer::passive_mode(accept_handle hdl) {
+  return doorman_data_[hdl].passive_mode;
 }
 
 intrusive_ptr<doorman>& test_multiplexer::impl_ptr(accept_handle hdl) {
@@ -275,18 +300,23 @@ bool test_multiplexer::has_pending_scribe(std::string x, uint16_t y) {
   return scribes_.count(std::make_pair(std::move(x), y)) > 0;
 }
 
-void test_multiplexer::accept_connection(accept_handle hdl) {
+bool test_multiplexer::accept_connection(accept_handle hdl) {
+  if (passive_mode(hdl))
+    return false;
   auto& dd = doorman_data_[hdl];
-  if (! dd.ptr)
-    throw std::logic_error("accept_connection: this doorman was not "
-                           "assigned to a broker yet");
-  dd.ptr->new_connection();
+  if (!dd.ptr)
+    return false;
+  if (!dd.ptr->new_connection())
+    passive_mode(hdl) = true;
+  return true;
 }
 
 void test_multiplexer::read_data(connection_handle hdl) {
+  if (passive_mode(hdl))
+    return;
   flush_runnables();
   scribe_data& sd = scribe_data_[hdl];
-  while (! sd.ptr)
+  while (!sd.ptr)
     exec_runnable();
   switch (sd.recv_conf.first) {
     case receive_policy_flag::exactly:
@@ -296,26 +326,29 @@ void test_multiplexer::read_data(connection_handle hdl) {
         auto last = first + static_cast<ptrdiff_t>(sd.recv_conf.second);
         sd.rd_buf.insert(sd.rd_buf.end(), first, last);
         sd.xbuf.erase(first, last);
-        sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size());
+        if (!sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size()))
+          passive_mode(hdl) = true;
       }
       break;
     case receive_policy_flag::at_least:
       if (sd.xbuf.size() >= sd.recv_conf.second) {
         sd.rd_buf.clear();
         sd.rd_buf.swap(sd.xbuf);
-        sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size());
+        if (!sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size()))
+          passive_mode(hdl) = true;
       }
       break;
     case receive_policy_flag::at_most:
       auto max_bytes = static_cast<ptrdiff_t>(sd.recv_conf.second);
-      while (! sd.xbuf.empty()) {
+      while (!sd.xbuf.empty()) {
         sd.rd_buf.clear();
         auto xbuf_size = static_cast<ptrdiff_t>(sd.xbuf.size());
         auto first = sd.xbuf.begin();
         auto last = (max_bytes < xbuf_size) ? first + max_bytes : sd.xbuf.end();
         sd.rd_buf.insert(sd.rd_buf.end(), first, last);
         sd.xbuf.erase(first, last);
-        sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size());
+        if (!sd.ptr->consume(this, sd.rd_buf.data(), sd.rd_buf.size()))
+          passive_mode(hdl) = true;
       }
   }
 }
@@ -368,14 +401,14 @@ void test_multiplexer::flush_runnables() {
     runnables.clear();
     { // critical section
       guard_type guard{mx_};
-      while (! resumables_.empty() && runnables.size() < max_runnable_count) {
+      while (!resumables_.empty() && runnables.size() < max_runnable_count) {
         runnables.emplace_back(std::move(resumables_.front()));
         resumables_.pop_front();
       }
     }
     for (auto& ptr : runnables)
       exec(ptr);
-  } while (! runnables.empty());
+  } while (!runnables.empty());
 }
 
 void test_multiplexer::exec_later(resumable* ptr) {

@@ -26,13 +26,13 @@
 #include "caf/none.hpp"
 #include "caf/unit.hpp"
 #include "caf/config.hpp"
-#include "caf/deep_to_string.hpp"
 
 #include "caf/detail/safe_equal.hpp"
+#include "caf/detail/scope_guard.hpp"
 
 namespace caf {
 
-/// A since C++17 compatible `optional` implementation.
+/// A C++17 compatible `optional` implementation.
 template <class T>
 class optional {
  public:
@@ -59,7 +59,9 @@ class optional {
     }
   }
 
-  optional(optional&& other) : m_valid(false) {
+  optional(optional&& other)
+  noexcept(std::is_nothrow_move_constructible<T>::value)
+    : m_valid(false) {
     if (other.m_valid) {
       cr(std::move(other.m_value));
     }
@@ -80,7 +82,9 @@ class optional {
     return *this;
   }
 
-  optional& operator=(optional&& other) {
+  optional& operator=(optional&& other)
+  noexcept(std::is_nothrow_destructible<T>::value &&
+           std::is_nothrow_move_assignable<T>::value) {
     if (m_valid) {
       if (other.m_valid) m_value = std::move(other.m_value);
       else destroy();
@@ -98,7 +102,7 @@ class optional {
 
   /// Checks whether this object does not contain a value.
   bool operator!() const {
-    return ! m_valid;
+    return !m_valid;
   }
 
   /// Returns the value.
@@ -152,7 +156,7 @@ class optional {
 
   template <class V>
   void cr(V&& x) {
-    CAF_ASSERT(! m_valid);
+    CAF_ASSERT(!m_valid);
     m_valid = true;
     new (&m_value) T(std::forward<V>(x));
   }
@@ -176,6 +180,10 @@ class optional<T&> {
     // nop
   }
 
+  optional(T* x) : m_value(x) {
+    // nop
+  }
+
   optional(const optional& other) = default;
 
   optional& operator=(const optional& other) = default;
@@ -185,7 +193,7 @@ class optional<T&> {
   }
 
   bool operator!() const {
-    return ! m_value;
+    return !m_value;
   }
 
   T& operator*() {
@@ -231,6 +239,8 @@ class optional<T&> {
 template <>
 class optional<void> {
  public:
+  using type = unit_t;
+
   optional(none_t = none) : m_value(false) {
     // nop
   }
@@ -248,42 +258,52 @@ class optional<void> {
   }
 
   bool operator!() const {
-    return ! m_value;
+    return !m_value;
   }
 
  private:
   bool m_value;
 };
 
+template <class Inspector, class T>
+typename std::enable_if<Inspector::reads_state,
+                        typename Inspector::result_type>::type
+inspect(Inspector& f, optional<T>& x) {
+  return x ? f(true, *x) : f(false);
+}
+
+template <class T>
+struct optional_inspect_helper {
+  bool& enabled;
+  T& storage;
+  template <class Inspector>
+  friend typename Inspector::result_type inspect(Inspector& f,
+                                                 optional_inspect_helper& x) {
+    return x.enabled ? f(x.storage) : f();
+  }
+};
+
+template <class Inspector, class T>
+typename std::enable_if<Inspector::writes_state,
+                        typename Inspector::result_type>::type
+inspect(Inspector& f, optional<T>& x) {
+  bool flag;
+  typename optional<T>::type tmp;
+  optional_inspect_helper<T> helper{flag, tmp};
+  auto guard = detail::make_scope_guard([&] {
+    if (flag)
+      x = std::move(tmp);
+    else
+      x = none;
+  });
+  return f(flag, helper);
+}
+
 
 /// @relates optional
 template <class T>
-std::string to_string(const optional<T>& x) {
-  return x ? "!" + deep_to_string(*x) : "<none>";
-}
-
-/// @relates optional
-template <class Processor, class T>
-typename std::enable_if<Processor::is_saving::value>::type
-serialize(Processor& sink, optional<T>& x, const unsigned int) {
-  uint8_t flag = x ? 1 : 0;
-  sink & flag;
-  if (flag)
-    sink & *x;
-}
-
-/// @relates optional
-template <class Processor, class T>
-typename std::enable_if<Processor::is_loading::value>::type
-serialize(Processor& source, optional<T>& x, const unsigned int) {
-  uint8_t flag;
-  source & flag;
-  if (flag) {
-    T value;
-    source & value;
-    x = std::move(value);
-  }
-  x = none;
+auto to_string(const optional<T>& x) -> decltype(to_string(*x)) {
+  return x ? "*" + to_string(*x) : "<null>";
 }
 
 // -- [X.Y.8] comparison with optional ----------------------------------------
@@ -292,31 +312,31 @@ serialize(Processor& source, optional<T>& x, const unsigned int) {
 template <class T>
 bool operator==(const optional<T>& lhs, const optional<T>& rhs) {
   return static_cast<bool>(lhs) == static_cast<bool>(rhs)
-      && (! lhs || *lhs == *rhs);
+      && (!lhs || *lhs == *rhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator!=(const optional<T>& lhs, const optional<T>& rhs) {
-  return ! (lhs == rhs);
+  return !(lhs == rhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator<(const optional<T>& lhs, const optional<T>& rhs) {
-  return static_cast<bool>(rhs) && (! lhs || *lhs < *rhs);
+  return static_cast<bool>(rhs) && (!lhs || *lhs < *rhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator<=(const optional<T>& lhs, const optional<T>& rhs) {
-  return ! (rhs < lhs);
+  return !(rhs < lhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator>=(const optional<T>& lhs, const optional<T>& rhs) {
-  return ! (lhs < rhs);
+  return !(lhs < rhs);
 }
 
 /// @relates optional
@@ -330,13 +350,13 @@ bool operator>(const optional<T>& lhs, const optional<T>& rhs) {
 /// @relates optional
 template <class T>
 bool operator==(const optional<T>& lhs, none_t) {
-  return ! lhs;
+  return !lhs;
 }
 
 /// @relates optional
 template <class T>
 bool operator==(none_t, const optional<T>& rhs) {
-  return ! rhs;
+  return !rhs;
 }
 
 /// @relates optional
@@ -366,7 +386,7 @@ bool operator<(none_t, const optional<T>& rhs) {
 /// @relates optional
 template <class T>
 bool operator<=(const optional<T>& lhs, none_t) {
-  return ! lhs;
+  return !lhs;
 }
 
 /// @relates optional
@@ -416,19 +436,19 @@ bool operator==(const T& lhs, const optional<T>& rhs) {
 /// @relates optional
 template <class T>
 bool operator!=(const optional<T>& lhs, const T& rhs) {
-  return ! lhs || ! (*lhs == rhs);
+  return !lhs || !(*lhs == rhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator!=(const T& lhs, const optional<T>& rhs) {
-  return ! rhs || ! (lhs == *rhs);
+  return !rhs || !(lhs == *rhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator<(const optional<T>& lhs, const T& rhs) {
-  return ! lhs || *lhs < rhs;
+  return !lhs || *lhs < rhs;
 }
 
 /// @relates optional
@@ -440,13 +460,13 @@ bool operator<(const T& lhs, const optional<T>& rhs) {
 /// @relates optional
 template <class T>
 bool operator<=(const optional<T>& lhs, const T& rhs) {
-  return ! lhs || ! (rhs < *lhs);
+  return !lhs || !(rhs < *lhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator<=(const T& lhs, const optional<T>& rhs) {
-  return rhs && ! (rhs < lhs);
+  return rhs && !(rhs < lhs);
 }
 
 /// @relates optional
@@ -458,19 +478,19 @@ bool operator>(const optional<T>& lhs, const T& rhs) {
 /// @relates optional
 template <class T>
 bool operator>(const T& lhs, const optional<T>& rhs) {
-  return ! rhs || *rhs < lhs;
+  return !rhs || *rhs < lhs;
 }
 
 /// @relates optional
 template <class T>
 bool operator>=(const optional<T>& lhs, const T& rhs) {
-  return lhs && ! (*lhs < rhs);
+  return lhs && !(*lhs < rhs);
 }
 
 /// @relates optional
 template <class T>
 bool operator>=(const T& lhs, const optional<T>& rhs) {
-  return ! rhs || ! (lhs < *rhs);
+  return !rhs || !(lhs < *rhs);
 }
 
 } // namespace caf

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -34,7 +34,7 @@ enum class protocol : uint32_t {
 };
 
 /// @relates protocol
-constexpr const char* to_string(protocol value) {
+inline std::string to_string(protocol value) {
   return value == protocol::ethernet ? "ethernet"
                                      : (value == protocol::ipv4 ? "ipv4"
                                                                 : "ipv6");

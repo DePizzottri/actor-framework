@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -32,8 +32,6 @@
 #include "caf/abstract_group.hpp"
 #include "caf/detail/shared_spinlock.hpp"
 
-#include "caf/detail/singleton_mixin.hpp"
-
 namespace caf {
 
 class group_manager {
@@ -53,6 +51,11 @@ public:
 
   // -- observers --------------------------------------------------------------
 
+  /// Get a handle to the group associated with given URI scheme.
+  /// @threadsafe
+  /// @experimental
+  expected<group> get(std::string group_uri) const;
+
   /// Get a handle to the group associated with
   /// `identifier` from the module `mod_name`.
   /// @threadsafe
@@ -62,7 +65,7 @@ public:
   /// Get a pointer to the group associated with
   /// `identifier` from the module `local`.
   /// @threadsafe
-  group get_local(const std::string& identifier) const;
+  group get_local(const std::string& group_identifier) const;
 
   /// Returns an anonymous group.
   /// Each calls to this member function returns a new instance
@@ -71,7 +74,7 @@ public:
   group anonymous() const;
 
   /// Returns the module named `name` if it exists, otherwise `none`.
-  optional<group_module&> get_module(const std::string& name) const;
+  optional<group_module&> get_module(const std::string& x) const;
 
 private:
   // -- constructors, destructors, and assignment operators --------------------

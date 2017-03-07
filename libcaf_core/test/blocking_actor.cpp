@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -58,6 +58,27 @@ CAF_TEST(catch_all) {
       CAF_CHECK_EQUAL(err, sec::unexpected_message);
     }
   );
+}
+
+CAF_TEST(behavior_ref) {
+  behavior bhvr{
+    [](int i) {
+      CAF_CHECK_EQUAL(i, 42);
+    }
+  };
+  self->send(self, 42);
+  self->receive(bhvr);
+}
+
+CAF_TEST(timeout_in_scoped_actor) {
+  bool timeout_called = false;
+  scoped_actor self{system};
+  self->receive(
+    after(std::chrono::milliseconds(20)) >> [&] {
+      timeout_called = true;
+    }
+  );
+  CAF_CHECK(timeout_called);
 }
 
 CAF_TEST_FIXTURE_SCOPE_END()

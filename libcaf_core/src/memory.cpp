@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -62,7 +62,7 @@ void make_cache_map() {
 cache_map& get_cache_map() {
   pthread_once(&s_key_once, make_cache_map);
   auto cache = reinterpret_cast<cache_map*>(pthread_getspecific(s_key));
-  if (! cache) {
+  if (cache == nullptr) {
     cache = new cache_map;
     pthread_setspecific(s_key, cache);
     // insert default types
@@ -81,7 +81,7 @@ thread_local std::unique_ptr<cache_map> s_key;
 } // namespace <anonymous>
 
 cache_map& get_cache_map() {
-  if (! s_key) {
+  if (!s_key) {
     s_key = std::unique_ptr<cache_map>(new cache_map);
     // insert default types
     std::unique_ptr<memory_cache> tmp(new basic_memory_cache<mailbox_element>);

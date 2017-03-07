@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -20,6 +20,7 @@
 #ifndef CAF_IO_RECEIVE_POLICY_HPP
 #define CAF_IO_RECEIVE_POLICY_HPP
 
+#include <string>
 #include <cstddef>
 #include <utility>
 
@@ -34,7 +35,7 @@ enum class receive_policy_flag {
   exactly
 };
 
-constexpr const char* to_string(receive_policy_flag x) {
+inline std::string to_string(receive_policy_flag x) {
   return x == receive_policy_flag::at_least
          ? "at_least"
          : (x == receive_policy_flag::at_most ? "at_most" : "exactly");

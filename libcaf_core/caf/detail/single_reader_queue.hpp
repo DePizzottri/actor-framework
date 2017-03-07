@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -72,7 +72,7 @@ public:
     CAF_ASSERT(new_element != nullptr);
     pointer e = stack_.load();
     for (;;) {
-      if (! e) {
+      if (!e) {
         // if tail is nullptr, the queue has been closed
         delete_(new_element);
         return enqueue_result::queue_closed;
@@ -95,19 +95,19 @@ public:
       return true;
     auto ptr = stack_.load();
     CAF_ASSERT(ptr != nullptr);
-    return ! is_dummy(ptr);
+    return !is_dummy(ptr);
   }
 
   /// Queries whether this queue is empty.
   /// @warning Call only from the reader (owner).
   bool empty() {
-    CAF_ASSERT(! closed());
-    return cache_.empty() && ! head_ && is_dummy(stack_.load());
+    CAF_ASSERT(!closed());
+    return cache_.empty() && !head_ && is_dummy(stack_.load());
   }
 
   /// Queries whether this has been closed.
   bool closed() {
-    return ! stack_.load();
+    return !stack_.load();
   }
 
   /// Queries whether this has been marked as blocked, i.e.,
@@ -142,7 +142,7 @@ public:
   template <class F>
   void close(const F& f) {
     clear_cached_elements(f);
-    if (! blocked() && fetch_new_data(nullptr))
+    if (!blocked() && fetch_new_data(nullptr))
       clear_cached_elements(f);
     cache_.clear(f);
   }
@@ -152,7 +152,7 @@ public:
   }
 
   ~single_reader_queue() {
-    if (! closed())
+    if (!closed())
       close();
   }
 
@@ -167,6 +167,12 @@ public:
       ++res;
     }
     return res;
+  }
+
+  pointer peek() {
+    if (head_ != nullptr || fetch_new_data())
+      return head_;
+    return nullptr;
   }
 
   // note: the cache is intended to be used by the owner, the queue itself
@@ -203,8 +209,8 @@ public:
 
   template <class Mutex, class CondVar>
   void synchronized_await(Mutex& mtx, CondVar& cv) {
-    CAF_ASSERT(! closed());
-    if (! can_fetch_more() && try_block()) {
+    CAF_ASSERT(!closed());
+    if (!can_fetch_more() && try_block()) {
       std::unique_lock<Mutex> guard(mtx);
       while (blocked())
         cv.wait(guard);
@@ -213,14 +219,14 @@ public:
 
   template <class Mutex, class CondVar, class TimePoint>
   bool synchronized_await(Mutex& mtx, CondVar& cv, const TimePoint& timeout) {
-    CAF_ASSERT(! closed());
-    if (! can_fetch_more() && try_block()) {
+    CAF_ASSERT(!closed());
+    if (!can_fetch_more() && try_block()) {
       std::unique_lock<Mutex> guard(mtx);
       while (blocked()) {
         if (cv.wait_until(guard, timeout) == std::cv_status::timeout) {
           // if we're unable to set the queue from blocked to empty,
           // than there's a new element in the list
-          return ! try_unblock();
+          return !try_unblock();
         }
       }
     }
@@ -238,7 +244,7 @@ private:
 
   // atomically sets stack_ back and enqueues all elements to the cache
   bool fetch_new_data(pointer end_ptr) {
-    CAF_ASSERT(! end_ptr || end_ptr == stack_empty_dummy());
+    CAF_ASSERT(!end_ptr || end_ptr == stack_empty_dummy());
     pointer e = stack_.load();
     // must not be called on a closed queue
     CAF_ASSERT(e != nullptr);
@@ -253,11 +259,11 @@ private:
         CAF_ASSERT(e != reader_blocked_dummy());
         if (is_dummy(e)) {
           // only use-case for this is closing a queue
-          CAF_ASSERT(! end_ptr);
+          CAF_ASSERT(!end_ptr);
           return false;
         }
         while (e) {
-          CAF_ASSERT(! is_dummy(e));
+          CAF_ASSERT(!is_dummy(e));
           auto next = e->next;
           e->next = head_;
           head_ = e;

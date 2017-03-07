@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -120,7 +120,7 @@ constexpr bool has_lazy_init_flag(spawn_options opts) {
 /// @cond PRIVATE
 
 constexpr bool is_unbound(spawn_options opts) {
-  return ! has_monitor_flag(opts) && ! has_link_flag(opts);
+  return !has_monitor_flag(opts) && !has_link_flag(opts);
 }
 
 constexpr spawn_options make_unbound(spawn_options opts) {

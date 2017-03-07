@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -28,6 +28,7 @@
 #include "caf/allowed_unsafe_message_type.hpp"
 
 #include "caf/detail/tuple_vals.hpp"
+#include "caf/detail/type_traits.hpp"
 
 namespace caf {
 
@@ -48,6 +49,11 @@ struct unbox_message_element<atom_constant<V>, 0> {
   using type = atom_value;
 };
 
+template <>
+struct unbox_message_element<actor_control_block*, 0> {
+  using type = strong_actor_ptr;
+};
+
 ///
 template <class T>
 struct is_serializable_or_whitelisted {
@@ -59,7 +65,7 @@ struct is_serializable_or_whitelisted {
 /// @relates message
 template <class T, class... Ts>
 typename std::enable_if<
-  ! std::is_same<message, typename std::decay<T>::type>::value
+  !std::is_same<message, typename std::decay<T>::type>::value
   || (sizeof...(Ts) > 0),
   message
 >::type
@@ -75,10 +81,11 @@ make_message(T&& x, Ts&&... xs) {
       >::type...
     >;
   static_assert(tl_forall<stored_types, is_serializable_or_whitelisted>::value,
-                "at least one type is not serializable via free "
+                "at least one type is neither inspectable via "
+                "inspect(Inspector&, T&) nor serializable via "
                 "'serialize(Processor&, T&, const unsigned int)' or "
-                "`T::serialize(Processor&, const unsigned int)` "
-                "member function; you can whitelist individual types by "
+                "`T::serialize(Processor&, const unsigned int)`; "
+                "you can whitelist individual types by "
                 "specializing `caf::allowed_unsafe_message_type<T>` "
                 "or using the macro CAF_ALLOW_UNSAFE_MESSAGE_TYPE");
   using storage = typename tl_apply<stored_types, tuple_vals>::type;

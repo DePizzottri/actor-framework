@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -27,13 +27,13 @@ namespace caf {
 namespace detail {
 
 void behavior_stack::pop_back() {
-  CAF_ASSERT(! elements_.empty());
+  CAF_ASSERT(!elements_.empty());
   erased_elements_.push_back(std::move(elements_.back()));
   elements_.pop_back();
 }
 
 void behavior_stack::clear() {
-  if (! elements_.empty()) {
+  if (!elements_.empty()) {
     if (erased_elements_.empty()) {
       elements_.swap(erased_elements_);
     } else {

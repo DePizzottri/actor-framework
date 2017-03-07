@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -37,11 +37,15 @@ public:
     ++s_ctors;
   }
 
-  ~worker() {
+  ~worker() override {
     ++s_dtors;
   }
 
   behavior make_behavior() override {
+    auto nested = exit_handler_;
+    set_exit_handler([=](scheduled_actor* self, exit_msg& em) {
+      nested(self, em);
+    });
     return {
       [](int x, int y) {
         return x + y;
@@ -75,7 +79,7 @@ struct fixture {
 };
 
 void handle_err(const error& err) {
-  throw std::runtime_error("AUT responded with an error: " + to_string(err));
+  CAF_FAIL("AUT responded with an error: " + to_string(err));
 }
 
 } // namespace <anonymous>
@@ -118,7 +122,7 @@ CAF_TEST(round_robin_actor_pool) {
   // poll actor pool up to 10 times or until it removes the failed worker
   bool success = false;
   size_t i = 0;
-  while (! success && ++i <= 10) {
+  while (!success && ++i <= 10) {
     self->request(pool, infinite, sys_atom::value, get_atom::value).receive(
       [&](std::vector<actor>& ws) {
         success = workers.size() == ws.size();

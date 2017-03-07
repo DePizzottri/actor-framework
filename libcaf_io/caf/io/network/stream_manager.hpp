@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -34,10 +34,11 @@ class stream_manager : public manager {
 public:
   stream_manager(abstract_broker* ptr);
 
-  ~stream_manager();
+  ~stream_manager() override;
 
   /// Called by the underlying I/O device whenever it received data.
-  virtual void consume(execution_unit* ctx, const void* buf, size_t bsize) = 0;
+  /// @returns `true` if the manager accepts further reads, otherwise `false`.
+  virtual bool consume(execution_unit* ctx, const void* buf, size_t bsize) = 0;
 
   /// Called by the underlying I/O device whenever it sent data.
   virtual void data_transferred(execution_unit* ctx, size_t num_bytes,

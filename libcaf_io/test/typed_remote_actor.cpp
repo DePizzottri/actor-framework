@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -39,9 +39,9 @@ struct ping {
   int32_t value;
 };
 
-template <class Processor>
-void serialize(Processor& proc, ping& x, const unsigned int) {
-  proc & x.value;
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, ping& x) {
+  return f(meta::type_name("ping"), x.value);
 }
 
 bool operator==(const ping& lhs, const ping& rhs) {
@@ -52,9 +52,9 @@ struct pong {
   int32_t value;
 };
 
-template <class Processor>
-void serialize(Processor& proc, pong& x, const unsigned int) {
-  proc & x.value;
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, pong& x) {
+  return f(meta::type_name("pong"), x.value);
 }
 
 bool operator==(const pong& lhs, const pong& rhs) {
@@ -85,12 +85,12 @@ void run_client(int argc, char** argv, uint16_t port) {
   // when trying to connect to get an untyped
   // handle to the server
   auto res = system.middleman().remote_actor("127.0.0.1", port);
-  CAF_REQUIRE(! res);
+  CAF_REQUIRE(!res);
   CAF_MESSAGE(system.render(res.error()));
   CAF_MESSAGE("connect to typed_remote_actor");
   CAF_EXP_THROW(serv,
-                system.middleman().typed_remote_actor<server_type>("127.0.0.1",
-                                                                   port));
+                system.middleman().remote_actor<server_type>("127.0.0.1",
+                                                             port));
   auto f = make_function_view(serv);
   CAF_CHECK_EQUAL(f(ping{42}), pong{42});
   anon_send_exit(serv, exit_reason::user_shutdown);

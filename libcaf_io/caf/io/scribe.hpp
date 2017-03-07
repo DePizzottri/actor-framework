@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -39,9 +39,9 @@ using scribe_base = broker_servant<network::stream_manager, connection_handle,
 /// @ingroup Broker
 class scribe : public scribe_base {
 public:
-  scribe(abstract_broker* parent, connection_handle hdl);
+  scribe(abstract_broker* ptr, connection_handle conn_hdl);
 
-  ~scribe();
+  ~scribe() override;
 
   /// Implicitly starts the read loop on first call.
   virtual void configure_read(receive_policy::config config) = 0;
@@ -61,7 +61,7 @@ public:
 
   void io_failure(execution_unit* ctx, network::operation op) override;
 
-  void consume(execution_unit*, const void*, size_t) override;
+  bool consume(execution_unit*, const void*, size_t) override;
 
   void data_transferred(execution_unit*, size_t, size_t) override;
 

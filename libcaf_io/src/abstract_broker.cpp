@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -46,14 +46,14 @@ void abstract_broker::enqueue(mailbox_element_ptr ptr, execution_unit*) {
   scheduled_actor::enqueue(std::move(ptr), &backend());
 }
 
-void abstract_broker::launch(execution_unit* eu, bool is_lazy, bool is_hidden) {
+void abstract_broker::launch(execution_unit* eu, bool lazy, bool hide) {
   CAF_ASSERT(eu != nullptr);
   CAF_ASSERT(eu == &backend());
+  CAF_LOG_TRACE(CAF_ARG(lazy) << CAF_ARG(hide));
   // add implicit reference count held by middleman/multiplexer
-  is_registered(! is_hidden);
-  CAF_PUSH_AID(id());
-  CAF_LOG_TRACE("init and launch broker:" << CAF_ARG(id()));
-  if (is_lazy && mailbox().try_block())
+  if (!hide)
+    register_at_system();
+  if (lazy && mailbox().try_block())
     return;
   intrusive_ptr_add_ref(ctrl());
   eu->exec_later(this);
@@ -75,16 +75,25 @@ abstract_broker::~abstract_broker() {
 void abstract_broker::configure_read(connection_handle hdl,
                                      receive_policy::config cfg) {
   CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(cfg));
-  by_id(hdl).configure_read(cfg);
+  auto x = by_id(hdl);
+  if (x)
+    x->configure_read(cfg);
 }
 
 void abstract_broker::ack_writes(connection_handle hdl, bool enable) {
   CAF_LOG_TRACE(CAF_ARG(hdl) << CAF_ARG(enable));
-  by_id(hdl).ack_writes(enable);
+  auto x = by_id(hdl);
+  if (x)
+    x->ack_writes(enable);
 }
 
 std::vector<char>& abstract_broker::wr_buf(connection_handle hdl) {
-  return by_id(hdl).wr_buf();
+  auto x = by_id(hdl);
+  if (!x) {
+    CAF_LOG_ERROR("tried to access wr_buf() of an unknown connection_handle");
+    return dummy_wr_buf_;
+  }
+  return x->wr_buf();
 }
 
 void abstract_broker::write(connection_handle hdl, size_t bs, const void* buf) {
@@ -95,7 +104,9 @@ void abstract_broker::write(connection_handle hdl, size_t bs, const void* buf) {
 }
 
 void abstract_broker::flush(connection_handle hdl) {
-  by_id(hdl).flush();
+  auto x = by_id(hdl);
+  if (x)
+    x->flush();
 }
 
 std::vector<connection_handle> abstract_broker::connections() const {
@@ -130,7 +141,7 @@ abstract_broker::add_tcp_scribe(network::native_socket fd) {
 
 void abstract_broker::add_doorman(const intrusive_ptr<doorman>& ptr) {
   doormen_.emplace(ptr->hdl(), ptr);
-  if (is_initialized())
+  if (getf(is_initialized_flag))
     ptr->launch();
 }
 
@@ -175,16 +186,16 @@ accept_handle abstract_broker::hdl_by_port(uint16_t port) {
   for (auto& kvp : doormen_)
     if (kvp.second->port() == port)
       return kvp.first;
-  CAF_RAISE_ERROR("no such port");
+  return invalid_accept_handle;
 }
 
 void abstract_broker::close_all() {
   CAF_LOG_TRACE("");
-  while (! doormen_.empty()) {
+  while (!doormen_.empty()) {
     // stop_reading will remove the doorman from doormen_
     doormen_.begin()->second->stop_reading();
   }
-  while (! scribes_.empty()) {
+  while (!scribes_.empty()) {
     // stop_reading will remove the scribe from scribes_
     scribes_.begin()->second->stop_reading();
   }
@@ -207,7 +218,7 @@ const char* abstract_broker::name() const {
 
 void abstract_broker::init_broker() {
   CAF_LOG_TRACE("");
-  is_initialized(true);
+  setf(is_initialized_flag);
   // launch backends now, because user-defined initialization
   // might call functions like add_connection
   for (auto& kvp : doormen_)

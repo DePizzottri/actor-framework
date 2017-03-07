@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -22,6 +22,7 @@
 #include <unordered_set>
 
 #include "caf/send.hpp"
+#include "caf/to_string.hpp"
 #include "caf/event_based_actor.hpp"
 #include "caf/actor_system_config.hpp"
 
@@ -29,6 +30,7 @@
 #include "caf/policy/work_stealing.hpp"
 
 #include "caf/scheduler/coordinator.hpp"
+#include "caf/scheduler/test_coordinator.hpp"
 #include "caf/scheduler/abstract_coordinator.hpp"
 #include "caf/scheduler/profiled_coordinator.hpp"
 
@@ -45,13 +47,13 @@ struct kvstate {
   std::unordered_map<strong_actor_ptr, topic_set> subscribers;
   static const char* name;
   template <class Processor>
-  friend void serialize(Processor& proc, kvstate& x, const unsigned int) {
+  friend void serialize(Processor& proc, kvstate& x, unsigned int) {
     proc & x.data;
     proc & x.subscribers;
   }
 };
 
-const char* kvstate::name = "caf.config_server";
+const char* kvstate::name = "config_server";
 
 behavior config_serv_impl(stateful_actor<kvstate>* self) {
   CAF_LOG_TRACE("");
@@ -100,10 +102,10 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
         for (auto& kvp : self->state.data)
           if (kvp.first != "*")
             msgs.emplace_back(kvp.first, kvp.second.first);
-        return make_message(ok_atom::value, std::move(msgs));
+        return make_message(std::move(msgs));
       }
       auto i = self->state.data.find(key);
-      return make_message(ok_atom::value, std::move(key),
+      return make_message(std::move(key),
                           i != self->state.data.end() ? i->second.first
                                                       : make_message());
     },
@@ -111,7 +113,7 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
     [=](subscribe_atom, const std::string& key) {
       auto subscriber = actor_cast<strong_actor_ptr>(self->current_sender());
       CAF_LOG_TRACE(CAF_ARG(key) << CAF_ARG(subscriber));
-      if (! subscriber)
+      if (!subscriber)
         return;
       self->state.data[key].second.insert(subscriber);
       auto& subscribers = self->state.subscribers;
@@ -126,7 +128,7 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
     // unsubscribe from a key
     [=](unsubscribe_atom, const std::string& key) {
       auto subscriber = actor_cast<strong_actor_ptr>(self->current_sender());
-      if (! subscriber)
+      if (!subscriber)
         return;
       CAF_LOG_TRACE(CAF_ARG(key) << CAF_ARG(subscriber));
       if (key == wildcard) {
@@ -143,17 +145,21 @@ behavior config_serv_impl(stateful_actor<kvstate>* self) {
   };
 }
 
-behavior spawn_serv_impl(event_based_actor* self) {
+struct spawn_serv_state {
+  static const char* name;
+};
+
+const char* spawn_serv_state::name = "spawn_server";
+
+behavior spawn_serv_impl(stateful_actor<spawn_serv_state>* self) {
   CAF_LOG_TRACE("");
   return {
-    [=](get_atom, const std::string& name, message& args)
-    -> result<ok_atom, strong_actor_ptr, std::set<std::string>> {
+    [=](spawn_atom, const std::string& name,
+        message& args, actor_system::mpi& xs)
+    -> expected<strong_actor_ptr> {
       CAF_LOG_TRACE(CAF_ARG(name) << CAF_ARG(args));
-      actor_config cfg{self->context()};
-      auto res = self->system().types().make_actor(name, cfg, args);
-      if (! res.first)
-        return sec::cannot_spawn_actor_from_arguments;
-      return {ok_atom::value, res.first, res.second};
+      return self->system().spawn<strong_actor_ptr>(name, std::move(args),
+                                                    self->context(), true, &xs);
     }
   };
 }
@@ -179,14 +185,15 @@ actor_system::module::~module() {
 actor_system::actor_system(actor_system_config& cfg)
     : ids_(0),
       types_(*this),
-      logger_(*this),
+      logger_(new caf::logger(*this), false),
       registry_(*this),
       groups_(*this),
       middleman_(nullptr),
       dummy_execution_unit_(this),
       await_actors_before_shutdown_(true),
       detached(0),
-      cfg_(cfg) {
+      cfg_(cfg),
+      logger_dtor_done_(false) {
   CAF_SET_LOGGER_SYS(this);
   for (auto& f : cfg.module_factories) {
     auto mod_ptr = f(*this);
@@ -199,15 +206,17 @@ actor_system::actor_system(actor_system_config& cfg)
   if (clptr)
     opencl_manager_ = reinterpret_cast<opencl::manager*>(clptr->subtype_ptr());
   auto& sched = modules_[module::scheduler];
+  using test = scheduler::test_coordinator;
   using share = scheduler::coordinator<policy::work_sharing>;
   using steal = scheduler::coordinator<policy::work_stealing>;
   using profiled_share = scheduler::profiled_coordinator<policy::work_sharing>;
   using profiled_steal = scheduler::profiled_coordinator<policy::work_stealing>;
   // set scheduler only if not explicitly loaded by user
-  if (! sched) {
+  if (!sched) {
     enum sched_conf {
       stealing          = 0x0001,
       sharing           = 0x0002,
+      testing           = 0x0003,
       profiled          = 0x0100,
       profiled_stealing = 0x0101,
       profiled_sharing  = 0x0102
@@ -215,6 +224,8 @@ actor_system::actor_system(actor_system_config& cfg)
     sched_conf sc = stealing;
     if (cfg.scheduler_policy == atom("sharing"))
       sc = sharing;
+    else if (cfg.scheduler_policy == atom("testing"))
+      sc = testing;
     else if (cfg.scheduler_policy != atom("stealing"))
       std::cerr << "[WARNING] " << deep_to_string(cfg.scheduler_policy)
                 << " is an unrecognized scheduler pollicy, "
@@ -235,10 +246,13 @@ actor_system::actor_system(actor_system_config& cfg)
       case profiled_sharing:
         sched.reset(new profiled_share(*this));
         break;
+      case testing:
+        sched.reset(new test(*this));
     }
   }
   // initialize state for each module and give each module the opportunity
   // to influence the system configuration, e.g., by adding more types
+  logger_->init(cfg);
   for (auto& mod : modules_)
     if (mod)
       mod->init(cfg);
@@ -248,7 +262,6 @@ actor_system::actor_system(actor_system_config& cfg)
   spawn_serv_ = actor_cast<strong_actor_ptr>(spawn<Flags>(spawn_serv_impl));
   config_serv_ = actor_cast<strong_actor_ptr>(spawn<Flags>(config_serv_impl));
   // fire up remaining modules
-  logger_.start();
   registry_.start();
   registry_.put(atom("SpawnServ"), spawn_serv_);
   registry_.put(atom("ConfigServ"), config_serv_);
@@ -256,9 +269,11 @@ actor_system::actor_system(actor_system_config& cfg)
     if (mod)
       mod->start();
   groups_.start();
+  logger_->start();
 }
 
 actor_system::~actor_system() {
+  CAF_LOG_DEBUG("shutdown actor system");
   if (await_actors_before_shutdown_)
     await_all_actors_done();
   // shutdown system-level servers
@@ -277,8 +292,12 @@ actor_system::~actor_system() {
       (*i)->stop();
   await_detached_threads();
   registry_.stop();
-  logger_.stop();
+  // reset logger and wait until dtor was called
   CAF_SET_LOGGER_SYS(nullptr);
+  logger_.reset();
+  std::unique_lock<std::mutex> guard{logger_dtor_mtx_};
+  while (!logger_dtor_done_)
+    logger_dtor_cv_.wait(guard);
 }
 
 /// Returns the host-local identifier for this system.
@@ -293,7 +312,7 @@ scheduler::abstract_coordinator& actor_system::scheduler() {
 }
 
 caf::logger& actor_system::logger() {
-  return logger_;
+  return *logger_;
 }
 
 actor_registry& actor_system::registry() {
@@ -305,8 +324,13 @@ const uniform_type_info_map& actor_system::types() const {
 }
 
 std::string actor_system::render(const error& x) const {
-  auto f = types().renderer(x.category());
-  return f ? f(x.code(), x.category(), x.context()) : to_string(x);
+  if (!x)
+    return to_string(x);
+  auto& xs = config().error_renderers;
+  auto i = xs.find(x.category());
+  if (i != xs.end())
+    return i->second(x.code(), x.category(), x.context());
+  return to_string(x);
 }
 
 group_manager& actor_system::groups() {
@@ -318,7 +342,7 @@ bool actor_system::has_middleman() const {
 }
 
 io::middleman& actor_system::middleman() {
-  if (! middleman_)
+  if (middleman_ == nullptr)
     CAF_RAISE_ERROR("cannot access middleman: module not loaded");
   return *middleman_;
 }
@@ -328,7 +352,7 @@ bool actor_system::has_opencl_manager() const {
 }
 
 opencl::manager& actor_system::opencl_manager() const {
-  if (! opencl_manager_)
+  if (opencl_manager_ == nullptr)
     CAF_RAISE_ERROR("cannot access opencl manager: module not loaded");
   return *opencl_manager_;
 }
@@ -354,16 +378,36 @@ void actor_system::inc_detached_threads() {
 }
 
 void actor_system::dec_detached_threads() {
-  if (--detached == 0) {
-    std::unique_lock<std::mutex> guard{detached_mtx};
+  std::unique_lock<std::mutex> guard{detached_mtx};
+  if (--detached == 0)
     detached_cv.notify_all();
-  }
 }
 
 void actor_system::await_detached_threads() {
   std::unique_lock<std::mutex> guard{detached_mtx};
   while (detached != 0)
     detached_cv.wait(guard);
+}
+
+expected<strong_actor_ptr>
+actor_system::dyn_spawn_impl(const std::string& name, message& args,
+                             execution_unit* ctx, bool check_interface,
+                             optional<const mpi&> expected_ifs) {
+  CAF_LOG_TRACE(CAF_ARG(name) << CAF_ARG(args) << CAF_ARG(check_interface)
+                << CAF_ARG(expected_ifs));
+  if (name.empty())
+    return sec::invalid_argument;
+  auto& fs = cfg_.actor_factories;
+  auto i = fs.find(name);
+  if (i == fs.end())
+    return sec::unknown_type;
+  actor_config cfg{ctx != nullptr ? ctx : &dummy_execution_unit_};
+  auto res = i->second(cfg, args);
+  if (!res.first)
+    return sec::cannot_spawn_actor_from_arguments;
+  if (check_interface && !assignable(res.second, *expected_ifs))
+    return sec::unexpected_actor_messaging_interface;
+  return std::move(res.first);
 }
 
 } // namespace caf

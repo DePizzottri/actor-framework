@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -38,7 +38,7 @@
 /// Denotes version of CAF in the format {MAJOR}{MINOR}{PATCH},
 /// whereas each number is a two-digit decimal number without
 /// leading zeros (e.g. 900 is version 0.9.0).
-#define CAF_VERSION 1500
+#define CAF_VERSION 1503
 
 /// Defined to the major version number of CAF.
 #define CAF_MAJOR_VERSION (CAF_VERSION / 10000)
@@ -89,6 +89,7 @@
     _Pragma("clang diagnostic ignored \"-Wunused-parameter\"")                 \
     _Pragma("clang diagnostic ignored \"-Wnested-anon-types\"")                \
     _Pragma("clang diagnostic ignored \"-Wreserved-id-macro\"")                \
+    _Pragma("clang diagnostic ignored \"-Wconstant-conversion\"")              \
     _Pragma("clang diagnostic ignored \"-Wimplicit-fallthrough\"")             \
     _Pragma("clang diagnostic ignored \"-Wused-but-marked-unused\"")           \
     _Pragma("clang diagnostic ignored \"-Wdisabled-macro-expansion\"")
@@ -133,7 +134,9 @@
 #  pragma warning( disable : 4624 )
 #  pragma warning( disable : 4800 )
 #  pragma warning( disable : 4503 )
-#  define NOMINMAX
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif // NOMINMAX
 #else
 #  define CAF_DEPRECATED
 #  define CAF_PUSH_WARNINGS
@@ -153,7 +156,7 @@
 #    define CAF_IOS
 #  else
 #    define CAF_MACOS
-#    if defined(CAF_GCC) && ! defined(_GLIBCXX_HAS_GTHREADS)
+#    if defined(CAF_GCC) && !defined(_GLIBCXX_HAS_GTHREADS)
 #      define _GLIBCXX_HAS_GTHREADS
 #    endif
 #  endif
@@ -167,12 +170,14 @@
 #  endif
 #elif defined(__FreeBSD__)
 #  define CAF_BSD
+#elif defined(__CYGWIN__)
+#  define CAF_CYGWIN
 #elif defined(WIN32) || defined(_WIN32)
 #  define CAF_WINDOWS
 #else
 #  error Platform and/or compiler not supportet
 #endif
-#if defined(CAF_MACOS) || defined(CAF_LINUX) || defined(CAF_BSD)
+#if defined(CAF_MACOS) || defined(CAF_LINUX) || defined(CAF_BSD) || defined(CAF_CYGWIN)
 #  define CAF_POSIX
 #endif
 
@@ -186,7 +191,7 @@
 # define CAF_ASSERT(stmt)                                                      \
   if (static_cast<bool>(stmt) == false) {                                      \
     printf("%s:%u: requirement failed '%s'\n", __FILE__, __LINE__, #stmt);     \
-    abort();                                                                   \
+    ::abort();                                                                 \
   } static_cast<void>(0)
 #else // defined(CAF_LINUX) || defined(CAF_MACOS)
 # include <execinfo.h>
@@ -196,23 +201,23 @@
     void* array[20];                                                           \
     auto caf_bt_size = ::backtrace(array, 20);                                 \
     ::backtrace_symbols_fd(array, caf_bt_size, 2);                             \
-    abort();                                                                   \
+    ::abort();                                                                 \
   } static_cast<void>(0)
 #endif
 
 // Convenience macros.
-#define CAF_IGNORE_UNUSED(x) static_cast<void>(x);
+#define CAF_IGNORE_UNUSED(x) static_cast<void>(x)
 
 #define CAF_CRITICAL(error)                                                    \
   do {                                                                         \
     fprintf(stderr, "[FATAL] %s:%u: critical error: '%s'\n",                   \
             __FILE__, __LINE__, error);                                        \
-    abort();                                                                   \
+    ::abort();                                                                 \
   } while (false)
 
 #ifdef CAF_NO_EXCEPTIONS
 # define CAF_RAISE_ERROR(msg)                                                  \
-  do { std::string str = msg; CAF_CRITICAL(str.c_str()); } while (false)
+  do { std::string str = msg; CAF_CRITICAL(str.c_str()); } while (true)
 #else // CAF_NO_EXCEPTIONS
 # define CAF_RAISE_ERROR(msg)                                                  \
   throw std::runtime_error(msg)

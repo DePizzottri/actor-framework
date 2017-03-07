@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -17,29 +17,26 @@
  * http://www.boost.org/LICENSE_1_0.txt.                                      *
  ******************************************************************************/
 
-#ifndef CAF_DETAIL_WRAPPED_HPP
-#define CAF_DETAIL_WRAPPED_HPP
+#ifndef CAF_META_OMITTABLE_IF_NONE_HPP
+#define CAF_META_OMITTABLE_IF_NONE_HPP
+
+#include "caf/meta/annotation.hpp"
 
 namespace caf {
-namespace detail {
+namespace meta {
 
-template <class T>
-struct wrapped {
-  constexpr wrapped() {
+struct omittable_if_none_t : annotation {
+  constexpr omittable_if_none_t() {
     // nop
   }
-  using type = T;
 };
 
-template <class T>
-struct wrapped<wrapped<T>> {
-  constexpr wrapped() {
-    // nop
-  }
-  using type = typename wrapped<T>::type;
-};
+/// Allows an inspector to omit the following data field if it is empty.
+constexpr omittable_if_none_t omittable_if_none() {
+  return {};
+}
 
-} // namespace detail
+} // namespace meta
 } // namespace caf
 
-#endif // CAF_DETAIL_WRAPPED_HPP
+#endif // CAF_META_OMITTABLE_IF_NONE_HPP

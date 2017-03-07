@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -42,9 +42,6 @@ public:
 
   // tell actor_cast which semantic this type uses
   static constexpr bool has_weak_ptr_semantics = false;
-
-  // tell actor_cast this pointer can be null
-  static constexpr bool has_non_null_guarantee = false;
 
   constexpr intrusive_ptr() noexcept : ptr_(nullptr) {
     // nop
@@ -122,7 +119,7 @@ public:
   }
 
   bool operator!() const noexcept {
-    return ! ptr_;
+    return !ptr_;
   }
 
   explicit operator bool() const noexcept {
@@ -166,13 +163,13 @@ private:
 /// @relates intrusive_ptr
 template <class T>
 bool operator==(const intrusive_ptr<T>& x, std::nullptr_t) {
-  return ! x;
+  return !x;
 }
 
 /// @relates intrusive_ptr
 template <class T>
 bool operator==(std::nullptr_t, const intrusive_ptr<T>& x) {
-  return ! x;
+  return !x;
 }
 
 /// @relates intrusive_ptr

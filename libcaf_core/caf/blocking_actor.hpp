@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -27,6 +27,7 @@
 #include "caf/fwd.hpp"
 #include "caf/send.hpp"
 #include "caf/none.hpp"
+#include "caf/after.hpp"
 #include "caf/extend.hpp"
 #include "caf/behavior.hpp"
 #include "caf/local_actor.hpp"
@@ -94,7 +95,7 @@ public:
   /// Pseudo receive condition modeling a single receive.
   class accept_one_cond : public receive_cond {
   public:
-    virtual ~accept_one_cond();
+    ~accept_one_cond() override;
     bool post() override;
   };
 
@@ -162,7 +163,7 @@ public:
           // nop
         }
         bool post() override {
-          return ! f();
+          return !f();
         }
       };
       cond rc{std::move(stmt)};
@@ -176,9 +177,9 @@ public:
 
   // -- constructors and destructors -------------------------------------------
 
-  blocking_actor(actor_config& sys);
+  blocking_actor(actor_config& cfg);
 
-  ~blocking_actor();
+  ~blocking_actor() override;
 
   // -- overridden functions of abstract_actor ---------------------------------
 
@@ -295,21 +296,20 @@ public:
   /// is signalized to other actors after `act()` returns.
   void fail_state(error err);
 
-  // -- observers --------------------------------------------------------------
-
-  /// Returns the current exit reason.
-  inline const error& fail_state() {
-    return fail_state_;
-  }
-
-  /// @cond PRIVATE
+  // -- customization points ---------------------------------------------------
 
   /// Blocks until at least one message is in the mailbox.
-  void await_data();
+  virtual void await_data();
 
   /// Blocks until at least one message is in the mailbox or
   /// the absolute `timeout` was reached.
-  bool await_data(timeout_type timeout);
+  virtual bool await_data(timeout_type timeout);
+
+  /// Returns the next element from the mailbox or `nullptr`.
+  /// The default implementation simply returns `next_message()`.
+  virtual mailbox_element_ptr dequeue();
+
+  /// @cond PRIVATE
 
   /// Receives messages until either a pre- or postcheck of `rcc` fails.
   template <class... Ts>
@@ -325,14 +325,18 @@ public:
         is_timeout_or_catch_all
       >::type;
     filtered tk;
-    behavior bhvr{apply_args(make_behavior_impl, get_indices(tk), tup)};
+    behavior bhvr{apply_moved_args(make_behavior_impl, get_indices(tk), tup)};
     using tail_indices = typename il_range<
                            tl_size<filtered>::value, sizeof...(Ts)
                          >::type;
     make_blocking_behavior_t factory;
-    auto fun = apply_args_prefixed(factory, tail_indices{}, tup, bhvr);
+    auto fun = apply_moved_args_prefixed(factory, tail_indices{}, tup, &bhvr);
     receive_impl(rcc, mid, fun);
   }
+
+  /// Receives messages until either a pre- or postcheck of `rcc` fails.
+  void varargs_tup_receive(receive_cond& rcc, message_id mid,
+                           std::tuple<behavior&>& tup);
 
   /// Receives messages until either a pre- or postcheck of `rcc` fails.
   template <class... Ts>

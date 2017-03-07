@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -30,21 +30,26 @@ namespace caf {
 /// to enable higher-order abstraction without cluttering code with
 /// exceptions for `void` (which can't be stored, for example).
 struct unit_t : detail::comparable<unit_t> {
-  constexpr unit_t() {
+  constexpr unit_t() noexcept {
     // nop
   }
 
-  constexpr unit_t(const unit_t&) {
+  constexpr unit_t(const unit_t&) noexcept {
     // nop
   }
 
   template <class T>
-  explicit constexpr unit_t(T&&) {
+  explicit constexpr unit_t(T&&) noexcept {
     // nop
   }
 
-  static constexpr int compare(const unit_t&) {
+  static constexpr int compare(const unit_t&) noexcept {
     return 0;
+  }
+
+  template <class... Ts>
+  constexpr unit_t operator()(Ts&&...) const noexcept {
+    return {};
   }
 };
 
@@ -52,14 +57,13 @@ static constexpr unit_t unit = unit_t{};
 
 /// @relates unit_t
 template <class Processor>
-void serialize(Processor&, const unit_t&, const unsigned int) {
+void serialize(Processor&, const unit_t&, unsigned int) {
   // nop
 }
 
 /// @relates unit_t
-template <class T>
-std::string to_string(const unit_t&) {
-  return "<unit>";
+inline std::string to_string(const unit_t&) {
+  return "unit";
 }
 
 template <class T>

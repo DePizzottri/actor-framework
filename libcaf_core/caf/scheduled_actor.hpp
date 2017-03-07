@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -140,7 +140,7 @@ public:
 
   explicit scheduled_actor(actor_config& cfg);
 
-  ~scheduled_actor();
+  ~scheduled_actor() override;
 
   // -- overridden functions of abstract_actor ---------------------------------
 
@@ -191,13 +191,16 @@ public:
   /// @warning This member function throws immediately in thread-based actors
   ///          that do not use the behavior stack, i.e., actors that use
   ///          blocking API calls such as {@link receive()}.
-  void quit(error reason = error{});
+  void quit(error x = error{});
 
   // -- event handlers ---------------------------------------------------------
 
   /// Sets a custom handler for unexpected messages.
   inline void set_default_handler(default_handler fun) {
-    default_handler_ = std::move(fun);
+    if (fun)
+      default_handler_ = std::move(fun);
+    else
+      default_handler_ = print_and_drop;
   }
 
   /// Sets a custom handler for unexpected messages.
@@ -216,7 +219,10 @@ public:
 
   /// Sets a custom handler for error messages.
   inline void set_error_handler(error_handler fun) {
-    error_handler_ = std::move(fun);
+    if (fun)
+      error_handler_ = std::move(fun);
+    else
+      error_handler_ = default_error_handler;
   }
 
   /// Sets a custom handler for error messages.
@@ -227,7 +233,10 @@ public:
 
   /// Sets a custom handler for down messages.
   inline void set_down_handler(down_handler fun) {
-    down_handler_ = std::move(fun);
+    if (fun)
+      down_handler_ = std::move(fun);
+    else
+      down_handler_ = default_down_handler;
   }
 
   /// Sets a custom handler for down messages.
@@ -238,7 +247,10 @@ public:
 
   /// Sets a custom handler for error messages.
   inline void set_exit_handler(exit_handler fun) {
-    exit_handler_ = std::move(fun);
+    if (fun)
+      exit_handler_ = std::move(fun);
+    else
+      exit_handler_ = default_exit_handler;
   }
 
   /// Sets a custom handler for exit messages.
@@ -250,8 +262,11 @@ public:
 # ifndef CAF_NO_EXCEPTIONS
   /// Sets a custom exception handler for this actor. If multiple handlers are
   /// defined, only the functor that was added *last* is being executed.
-  inline void set_exception_handler(exception_handler f) {
-    exception_handler_ = std::move(f);
+  inline void set_exception_handler(exception_handler fun) {
+    if (fun)
+      exception_handler_ = std::move(fun);
+    else
+      exception_handler_ = default_exception_handler;
   }
 
   /// Sets a custom exception handler for this actor. If multiple handlers are
@@ -281,7 +296,7 @@ public:
   void reset_timeout(uint32_t timeout_id);
 
   /// Returns whether `timeout_id` is currently active.
-  bool is_active_timeout(uint32_t timeout_id) const;
+  bool is_active_timeout(uint32_t tid) const;
 
   // -- message processing -----------------------------------------------------
 
@@ -320,13 +335,13 @@ public:
   /// Returns whether `true` if the behavior stack is not empty or
   /// if outstanding responses exist, `false` otherwise.
   inline bool has_behavior() const {
-    return ! bhvr_stack_.empty()
-           || ! awaited_responses_.empty()
-           || ! multiplexed_responses_.empty();
+    return !bhvr_stack_.empty()
+           || !awaited_responses_.empty()
+           || !multiplexed_responses_.empty();
   }
 
   inline behavior& current_behavior() {
-    return ! awaited_responses_.empty() ? awaited_responses_.front().second
+    return !awaited_responses_.empty() ? awaited_responses_.front().second
                                         : bhvr_stack_.back();
   }
 
@@ -342,6 +357,36 @@ public:
 
 protected:
   /// @cond PRIVATE
+
+  /// Utility function that swaps `f` into a temporary before calling it
+  /// and restoring `f` only if it has not been replaced by the user.
+  template <class F, class... Ts>
+  auto call_handler(F& f, Ts&&... xs)
+  -> typename std::enable_if<
+       !std::is_same<decltype(f(std::forward<Ts>(xs)...)), void>::value,
+       decltype(f(std::forward<Ts>(xs)...))
+     >::type {
+    using std::swap;
+    F g;
+    swap(f, g);
+    auto res = g(std::forward<Ts>(xs)...);
+    if (!f)
+      swap(g, f);
+    return res;
+  }
+
+  template <class F, class... Ts>
+  auto call_handler(F& f, Ts&&... xs)
+  -> typename std::enable_if<
+       std::is_same<decltype(f(std::forward<Ts>(xs)...)), void>::value
+     >::type {
+    using std::swap;
+    F g;
+    swap(f, g);
+    g(std::forward<Ts>(xs)...);
+    if (!f)
+      swap(g, f);
+  }
 
   // -- member variables -------------------------------------------------------
 

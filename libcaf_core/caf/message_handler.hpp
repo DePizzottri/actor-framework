@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -79,14 +79,14 @@ public:
   template <class... Ts>
   void assign(Ts... xs) {
     static_assert(sizeof...(Ts) > 0, "assign without arguments called");
-    static_assert(! detail::disjunction<may_have_timeout<
+    static_assert(!detail::disjunction<may_have_timeout<
                       typename std::decay<Ts>::type>::value...
                     >::value, "Timeouts are only allowed in behaviors");
     impl_ = detail::make_behavior(xs...);
   }
 
   /// Equal to `*this = other`.
-  void assign(message_handler other);
+  void assign(message_handler what);
 
   /// Runs this handler and returns its (optional) result.
   inline optional<message> operator()(message& arg) {
@@ -96,6 +96,18 @@ public:
   /// Runs this handler and returns its (optional) result.
   inline optional<message> operator()(type_erased_tuple& xs) {
     return impl_ ? impl_->invoke(xs) : none;
+  }
+
+  /// Runs this handler with callback.
+  inline match_case::result operator()(detail::invoke_result_visitor& f,
+                                       type_erased_tuple& xs) {
+    return impl_ ? impl_->invoke(f, xs) : match_case::no_match;
+  }
+
+  /// Runs this handler with callback.
+  inline match_case::result operator()(detail::invoke_result_visitor& f,
+                                       message& xs) {
+    return impl_ ? impl_->invoke(f, xs) : match_case::no_match;
   }
 
   /// Returns a new handler that concatenates this handler
@@ -112,7 +124,7 @@ public:
     // using a behavior is safe here, because we "cast"
     // it back to a message_handler when appropriate
     behavior tmp{std::forward<Ts>(xs)...};
-    if (! tmp) {
+    if (!tmp) {
       return *this;
     }
     if (impl_)

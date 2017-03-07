@@ -1,6 +1,7 @@
 // Showcases how to add custom POD message types.
 
-// Manual refs: 23-26, 29-33, 87-90, 93-96 (ConfiguringActorApplications)
+// Manual refs: 24-27, 30-34, 75-78, 81-84 (ConfiguringActorApplications)
+//              23-33 (TypeInspection)
 
 #include <string>
 #include <vector>
@@ -26,16 +27,9 @@ struct foo {
 };
 
 // foo needs to be serializable
-template <class Processor>
-void serialize(Processor& proc, foo& x, const unsigned int) {
-  proc & x.a;
-  proc & x.b;
-}
-
-// also, CAF gives us `deep_to_string` for implementing `to_string` easily
-std::string to_string(const foo& x) {
-  // `to_string(foo{{1, 2, 3}, 4})` prints: "foo([1, 2, 3], 4)"
-  return "foo" + deep_to_string_as_tuple(x.a, x.b);
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, foo& x) {
+  return f(meta::type_name("foo"), x.a, x.b);
 }
 
 // a pair of two ints
@@ -51,15 +45,9 @@ struct foo2 {
 };
 
 // foo2 also needs to be serializable
-template <class Processor>
-void serialize(Processor& proc, foo2& x, const unsigned int) {
-  proc & x.a;
-  proc & x.b; // traversed automatically and recursively
-}
-
-// `deep_to_string` also traverses nested containers
-std::string to_string(const foo2& x) {
-  return "foo" + deep_to_string_as_tuple(x.a, x.b);
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, foo2& x) {
+  return f(meta::type_name("foo2"), x.a, x.b);
 }
 
 // receives our custom message types
@@ -105,10 +93,20 @@ void caf_main(actor_system& system, const config&) {
   vector<char> buf;
   // write f1 to buffer
   binary_serializer bs{system, buf};
-  bs << f1;
+  auto e = bs(f1);
+  if (e) {
+    std::cerr << "*** unable to serialize foo2: "
+              << system.render(e) << std::endl;
+    return;
+  }
   // read f2 back from buffer
   binary_deserializer bd{system, buf};
-  bd >> f2;
+  e = bd(f2);
+  if (e) {
+    std::cerr << "*** unable to serialize foo2: "
+              << system.render(e) << std::endl;
+    return;
+  }
   // must be equal
   assert(to_string(f1) == to_string(f2));
   // spawn a testee that receives two messages of user-defined type
@@ -118,7 +116,6 @@ void caf_main(actor_system& system, const config&) {
   self->send(t, foo{std::vector<int>{1, 2, 3, 4}, 5});
   // send t a foo_pair2
   self->send(t, foo_pair2{3, 4});
-  self->await_all_other_actors_done();
 }
 
 } // namespace <anonymous>

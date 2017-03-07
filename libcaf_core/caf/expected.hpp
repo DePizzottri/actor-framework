@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -59,7 +59,7 @@ public:
 
   template <class U>
   expected(U x,
-           typename std::enable_if<std::is_convertible<U, T>::value>::type* = 0)
+           typename std::enable_if<std::is_convertible<U, T>::value>::type* = nullptr)
       : engaged_(true) {
     new (&value_) T(std::move(x));
   }
@@ -96,7 +96,7 @@ public:
   expected& operator=(const expected& other) noexcept(nothrow_copy) {
     if (engaged_ && other.engaged_)
       value_ = other.value_;
-    else if (! engaged_ && ! other.engaged_)
+    else if (!engaged_ && !other.engaged_)
       error_ = other.error_;
     else {
       destroy();
@@ -108,7 +108,7 @@ public:
   expected& operator=(expected&& other) noexcept(nothrow_move) {
     if (engaged_ && other.engaged_)
       value_ = std::move(other.value_);
-    else if (! engaged_ && ! other.engaged_)
+    else if (!engaged_ && !other.engaged_)
       error_ = std::move(other.error_);
     else {
       destroy();
@@ -147,7 +147,7 @@ public:
   }
 
   expected& operator=(caf::error e) noexcept {
-    if (! engaged_)
+    if (!engaged_)
       error_ = std::move(e);
     else {
       destroy();
@@ -182,7 +182,7 @@ public:
 
   /// @copydoc cerror
   caf::error& error() noexcept {
-    CAF_ASSERT(! engaged_);
+    CAF_ASSERT(!engaged_);
     return error_;
   }
 
@@ -224,13 +224,13 @@ public:
   /// Returns the contained error.
   /// @pre `engaged() == false`.
   const caf::error& cerror() const noexcept {
-    CAF_ASSERT(! engaged_);
+    CAF_ASSERT(!engaged_);
     return error_;
   }
 
   /// @copydoc cerror
   const caf::error& error() const noexcept {
-    CAF_ASSERT(! engaged_);
+    CAF_ASSERT(!engaged_);
     return error_;
   }
 
@@ -270,7 +270,7 @@ private:
 template <class T>
 auto operator==(const expected<T>& x, const expected<T>& y)
 -> decltype(*x == *y) {
-  return x && y ? *x == *y : (! x && ! y ? x.error() == y.error() : false);
+  return x && y ? *x == *y : (!x && !y ? x.error() == y.error() : false);
 }
 
 /// @relates expected
@@ -313,43 +313,43 @@ enable_if_has_make_error_t<E, bool> operator==(E x, const expected<T>& y) {
 template <class T>
 auto operator!=(const expected<T>& x, const expected<T>& y)
 -> decltype(*x == *y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates expected
 template <class T, class U>
 auto operator!=(const expected<T>& x, const U& y) -> decltype(*x == y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates expected
 template <class T, class U>
 auto operator!=(const T& x, const expected<U>& y) -> decltype(x == *y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates expected
 template <class T>
 bool operator!=(const expected<T>& x, const error& y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates expected
 template <class T>
 bool operator!=(const error& x, const expected<T>& y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates expected
 template <class T, class E>
 enable_if_has_make_error_t<E, bool> operator!=(const expected<T>& x, E y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// @relates expected
 template <class T, class E>
 enable_if_has_make_error_t<E, bool> operator!=(E x, const expected<T>& y) {
-  return ! (x == y);
+  return !(x == y);
 }
 
 /// The pattern `expected<void>` shall be used for functions that may generate
@@ -380,10 +380,7 @@ public:
     // nop
   }
 
-  expected& operator=(const expected& other) noexcept {
-    error_ = other.error_;
-    return *this;
-  }
+  expected& operator=(const expected& other) = default;
 
   expected& operator=(expected&& other) noexcept {
     error_ = std::move(other.error_);
@@ -391,7 +388,7 @@ public:
   }
 
   explicit operator bool() const {
-    return ! error_;
+    return !error_;
   }
 
   const caf::error& error() const {
@@ -400,6 +397,22 @@ public:
 
 private:
   caf::error error_;
+};
+
+/// @relates expected
+inline bool operator==(const expected<void>& x, const expected<void>& y) {
+  return (x && y) || (!x && !y && x.error() == y.error());
+}
+
+/// @relates expected
+inline bool operator!=(const expected<void>& x, const expected<void>& y) {
+  return !(x == y);
+}
+
+template <>
+class expected<unit_t> : public expected<void> {
+public:
+  using expected<void>::expected;
 };
 
 template <class T>
@@ -416,7 +429,7 @@ auto to_string(const expected<T>& x) -> decltype(to_string(*x)) {
 /// @experimental
 #define CAF_EXP_THROW(var, expr)                                               \
   auto CAF_UNIFYN(tmp_var_) = expr;                                            \
-  if (! CAF_UNIFYN(tmp_var_))                                                  \
+  if (!CAF_UNIFYN(tmp_var_))                                                  \
     CAF_RAISE_ERROR(to_string(CAF_UNIFYN(tmp_var_).error()));                  \
   auto& var = *CAF_UNIFYN(tmp_var_)
 /// @endcond

@@ -29,8 +29,9 @@ network transparent messaging, and more.
 * __Developer Blog__: http://blog.actor-framework.org
 * __Doxygen__: http://www.actor-framework.org/doc
 * __HTML Manual__: https://actor-framework.readthedocs.io
-* __PDF Manual (stable)__: http://www.actor-framework.org/pdf/manual.pdf
-* __PDF Manual (latest)__: http://www.actor-framework.org/develop/pdf/manual.pdf
+* __PDF Manual__: http://www.actor-framework.org/pdf/manual.pdf
+* __HTML Manual (develop version)__: https://actor-framework.readthedocs.io/en/develop/
+* __PDF Manual (develop version)__: http://www.actor-framework.org/develop/pdf/manual.pdf
 
 ## Report Bugs / Get Help
 
@@ -129,16 +130,14 @@ A SNocs workspace is provided by GitHub user
 
 * GCC >= 4.8
 * Clang >= 3.2
+* MSVC >= 2015, update 3
 
 ## Supported Operating Systems
 
 * Linux
 * Mac OS X
 * FreeBSD 10
-* *Note for MS Windows*: CAF relies on C++11 features such as variadic templates
-  and unrestricted unions. We will support Visual Studio as soon as Microsoft's
-  compiler implements all required C++11 features. In the meantime, you can
-  use CAF via MinGW.
+* Windows >= 7 (currently static builds only)
 
 ## Scientific Use
 
@@ -185,7 +184,7 @@ https://software.opensuse.org/download.html?project=devel%3Alibraries%3Acaf&pack
 https://software.opensuse.org/download.html?project=devel%3Alibraries%3Acaf%3Anightly&package=caf-devel
 
 [jenkins-badge]:
-https://jenkins.inet.haw-hamburg.de/buildStatus/icon?job=CAF/master%20branch
+https://jenkins.inet.haw-hamburg.de/buildStatus/icon?job=CAF/develop%20branch
 
 [docs-badge]:
 https://readthedocs.org/projects/actor-framework/badge/?version=latest

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -101,7 +101,7 @@ struct fixture {
   actor_system_config cfg;
   actor_system system;
 
-  fixture() : system(cfg), config_server(unsafe_actor_handle_init) {
+  fixture() : system(cfg) {
     // nop
   }
 
@@ -110,7 +110,7 @@ struct fixture {
     std::stringstream ss;
     std::stringstream err;
     ss << str;
-    detail::parse_ini(ss, consumer, err);
+    detail::parse_ini(ss, consumer, static_cast<std::ostream&>(err));
     split(errors, err.str(), is_any_of("\n"), token_compress_on);
   }
 
@@ -119,13 +119,14 @@ struct fixture {
     // clear config
     scoped_actor self{system};
     self->request(config_server, infinite, get_atom::value, "*").receive(
-      [&](ok_atom, std::vector<std::pair<std::string, message>>& msgs) {
+      [&](std::vector<std::pair<std::string, message>>& msgs) {
         for (auto& kvp : msgs)
           self->send(config_server, put_atom::value, kvp.first, message{});
       },
       ERROR_HANDLER
     );
-    auto consume = [&](size_t, std::string key, config_value& value) {
+    auto consume = [&](size_t, std::string key, config_value& value,
+                       optional<std::ostream&>) {
       message_visitor mv;
       anon_send(config_server, put_atom::value,
                 std::move(key), apply_visitor(mv, value));
@@ -134,7 +135,8 @@ struct fixture {
   }
 
   void load(const char* str) {
-    auto consume = [&](size_t, std::string key, config_value& value) {
+    auto consume = [&](size_t, std::string key, config_value& value,
+                       optional<std::ostream&>) {
       values.emplace(std::move(key), std::move(value));
     };
     load_impl(consume, str);
@@ -152,7 +154,7 @@ struct fixture {
         std::is_convertible<T, std::string>::value,
         std::string,
         typename std::conditional<
-          std::is_integral<T>::value && ! std::is_same<T, bool>::value,
+          std::is_integral<T>::value && !std::is_same<T, bool>::value,
           int64_t,
           T
         >::type
@@ -160,7 +162,7 @@ struct fixture {
     bool result = false;
     scoped_actor self{system};
     self->request(config_server, infinite, get_atom::value, key).receive(
-      [&](ok_atom, std::string&, message& msg) {
+      [&](std::string&, message& msg) {
         msg.apply(
           [&](type& val) {
             result = detail::safe_equal(what, val);
@@ -174,7 +176,7 @@ struct fixture {
 
   template <class T>
   bool value_is(const char* key, const T& what) {
-    if (! config_server.unsafe())
+    if (config_server)
       return config_server_has(key, what);
     auto& cv = values[key];
     using type =
@@ -182,7 +184,7 @@ struct fixture {
         std::is_convertible<T, std::string>::value,
         std::string,
         typename std::conditional<
-          std::is_integral<T>::value && ! std::is_same<T, bool>::value,
+          std::is_integral<T>::value && !std::is_same<T, bool>::value,
           int64_t,
           T
         >::type
@@ -192,13 +194,13 @@ struct fixture {
   }
 
   size_t num_values() {
-    if (! config_server.unsafe()) {
+    if (config_server) {
       size_t result = 0;
       scoped_actor self{system};
       self->request(config_server, infinite, get_atom::value, "*").receive(
-        [&](ok_atom, std::vector<std::pair<std::string, message>>& msgs) {
+        [&](std::vector<std::pair<std::string, message>>& msgs) {
           for (auto& kvp : msgs)
-            if (! kvp.second.empty())
+            if (!kvp.second.empty())
               ++result;
         },
         ERROR_HANDLER

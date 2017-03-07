@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -23,6 +23,7 @@
 #include <type_traits>
 
 #include "caf/fwd.hpp"
+#include "caf/logger.hpp"
 #include "caf/ref_counted.hpp"
 #include "caf/infer_handle.hpp"
 #include "caf/intrusive_ptr.hpp"
@@ -33,6 +34,7 @@ namespace caf {
 
 template <class T, class R = infer_handle_from_class_t<T>, class... Ts>
 R make_actor(actor_id aid, node_id nid, actor_system* sys, Ts&&... xs) {
+  CAF_LOG_SPAWN_EVENT(aid, std::forward_as_tuple(xs...));
   auto ptr = new actor_storage<T>(aid, std::move(nid), sys,
                                   std::forward<Ts>(xs)...);
   return {&(ptr->ctrl), false};

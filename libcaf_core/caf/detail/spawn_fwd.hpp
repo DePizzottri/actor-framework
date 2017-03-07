@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -49,7 +49,7 @@ typename std::conditional<
   T&&
 >::type
 spawn_fwd(typename std::remove_reference<T>::type&& arg) noexcept {
-  static_assert(! std::is_lvalue_reference<T>::value,
+  static_assert(!std::is_lvalue_reference<T>::value,
                 "silently converting an lvalue to an rvalue");
   return static_cast<T&&>(arg);
 }

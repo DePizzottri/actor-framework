@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -29,7 +29,7 @@ namespace caf {
 
 class timeout_definition_builder {
 public:
-  constexpr timeout_definition_builder(const duration& d) : tout_(d) {
+  constexpr timeout_definition_builder(duration d) : tout_(d) {
     // nop
   }
 
@@ -43,10 +43,15 @@ private:
 };
 
 /// Returns a generator for timeouts.
+constexpr timeout_definition_builder after(duration d) {
+  return {d};
+}
+
+/// Returns a generator for timeouts.
 template <class Rep, class Period>
 constexpr timeout_definition_builder
-after(const std::chrono::duration<Rep, Period>& d) {
-  return {duration(d)};
+after(std::chrono::duration<Rep, Period> d) {
+  return after(duration{d});
 }
 
 } // namespace caf

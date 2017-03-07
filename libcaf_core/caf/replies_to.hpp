@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -37,35 +37,46 @@ std::string replies_to_type_name(size_t input_size,
                                  const std::string* output_opt1);
 /// @endcond
 
-template <class InputTypes, class OutputTypes>
-struct typed_mpi;
+template <class...>
+struct output_stream {};
 
-template <class... Is, class... Ls>
-struct typed_mpi<detail::type_list<Is...>,
+template <class...>
+struct output_tuple {};
+
+template <class Input, class Output>
+struct typed_mpi {};
+
+/*
+<detail::type_list<Is...>,
                  detail::type_list<Ls...>> {
   static_assert(sizeof...(Is) > 0, "template parameter pack Is empty");
   static_assert(sizeof...(Ls) > 0, "template parameter pack Ls empty");
-  using input_types = detail::type_list<Is...>;
-  using output_types = detail::type_list<Ls...>;
-  static_assert(! detail::tl_exists<
+  using input = detail::type_list<Is...>;
+  using output = detail::type_list<Ls...>;
+  static_assert(!detail::tl_exists<
                   input_types,
                   is_illegal_message_element
                 >::value
-                && ! detail::tl_exists<
+                && !detail::tl_exists<
                   output_types,
                   is_illegal_message_element
                 >::value,
                 "interface definition contains an illegal message type");
 };
+*/
 
 template <class... Is>
 struct replies_to {
   template <class... Os>
-  using with = typed_mpi<detail::type_list<Is...>, detail::type_list<Os...>>;
+  using with = typed_mpi<detail::type_list<Is...>, output_tuple<Os...>>;
+
+  /// @private
+  template <class... Os>
+  using with_stream = typed_mpi<detail::type_list<Is...>, output_stream<Os...>>;
 };
 
 template <class... Is>
-using reacts_to = typed_mpi<detail::type_list<Is...>, detail::type_list<void>>;
+using reacts_to = typed_mpi<detail::type_list<Is...>, output_tuple<void>>;
 
 } // namespace caf
 

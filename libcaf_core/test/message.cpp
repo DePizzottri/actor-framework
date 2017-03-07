@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -137,8 +137,8 @@ CAF_TEST(extract_opts) {
   CAF_CHECK(r.opts.count("foo") > 0);
   CAF_CHECK_EQUAL(foo, 42);
   CAF_CHECK_EQUAL(bar, 0);
-  CAF_CHECK(! r.error.empty()); // -b is an unknown option
-  CAF_CHECK(! r.remainder.empty()
+  CAF_CHECK(!r.error.empty()); // -b is an unknown option
+  CAF_CHECK(!r.remainder.empty()
             && to_string(r.remainder) == to_string(make_message("-b", "1337")));
   r = r.remainder.extract_opts({
     {"bar,b", "bar desc", bar}
@@ -170,26 +170,18 @@ struct s1 {
   int value[3] = {10, 20, 30};
 };
 
-template <class Processor>
-void serialize(Processor& proc, s1& x, const unsigned int) {
-  proc & x.value;
-}
-
-std::string to_string(const s1& x) {
-  return deep_to_string(x.value);
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, s1& x) {
+  return f(x.value);
 }
 
 struct s2 {
   int value[4][2] = {{1, 10}, {2, 20}, {3, 30}, {4, 40}};
 };
 
-template <class Processor>
-void serialize(Processor& proc, s2& x, const unsigned int) {
-  proc & x.value;
-}
-
-std::string to_string(const s2& x) {
-  return deep_to_string(x.value);
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, s2& x) {
+  return f(x.value);
 }
 
 struct s3 {
@@ -199,13 +191,9 @@ struct s3 {
   }
 };
 
-template <class Processor>
-void serialize(Processor& proc, s3& x, const unsigned int) {
-  proc & x.value;
-}
-
-std::string to_string(const s3& x) {
-  return deep_to_string(x.value);
+template <class Inspector>
+typename Inspector::result_type inspect(Inspector& f, s3& x) {
+  return f(x.value);
 }
 
 template <class... Ts>
@@ -218,7 +206,8 @@ std::string msg_as_string(Ts&&... xs) {
 CAF_TEST(compare_custom_types) {
   s2 tmp;
   tmp.value[0][1] = 100;
-  CAF_CHECK(to_string(make_message(s2{})) != to_string(make_message(tmp)));
+  CAF_CHECK_NOT_EQUAL(to_string(make_message(s2{})),
+                      to_string(make_message(tmp)));
 }
 
 CAF_TEST(empty_to_string) {
@@ -244,7 +233,7 @@ CAF_TEST(strings_to_string) {
                            svec{"five", "six", "seven"});
   CAF_CHECK(to_string(msg3) ==
           R"__((["one", "two"], "three", "four", ["five", "six", "seven"]))__");
-  auto msg4 = make_message("this is a \"test\"");
+  auto msg4 = make_message(R"(this is a "test")");
   CAF_CHECK_EQUAL(to_string(msg4), "(\"this is a \\\"test\\\"\")");
 }
 

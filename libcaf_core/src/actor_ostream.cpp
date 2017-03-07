@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -56,7 +56,7 @@ actor_ostream& actor_ostream::flush() {
 }
 
 void actor_ostream::redirect(abstract_actor* self, std::string fn, int flags) {
-  if (! self)
+  if (self == nullptr)
     return;
   auto pr = self->home_system().scheduler().printer();
   pr->enqueue(make_mailbox_element(nullptr, message_id::make(), {},
@@ -74,8 +74,8 @@ void actor_ostream::redirect_all(actor_system& sys, std::string fn, int flags) {
 }
 
 void actor_ostream::init(abstract_actor* self) {
-  if (! self->get_flag(abstract_actor::has_used_aout_flag))
-    self->set_flag(true, abstract_actor::has_used_aout_flag);
+  if (!self->getf(abstract_actor::has_used_aout_flag))
+    self->setf(abstract_actor::has_used_aout_flag);
 }
 
 actor_ostream aout(local_actor* self) {

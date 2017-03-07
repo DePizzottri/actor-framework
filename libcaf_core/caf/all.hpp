@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -27,6 +27,7 @@
 #include "caf/send.hpp"
 #include "caf/skip.hpp"
 #include "caf/unit.hpp"
+#include "caf/term.hpp"
 #include "caf/actor.hpp"
 #include "caf/after.hpp"
 #include "caf/error.hpp"
@@ -43,6 +44,7 @@
 #include "caf/exec_main.hpp"
 #include "caf/resumable.hpp"
 #include "caf/streambuf.hpp"
+#include "caf/to_string.hpp"
 #include "caf/actor_addr.hpp"
 #include "caf/actor_pool.hpp"
 #include "caf/attachable.hpp"
@@ -91,14 +93,19 @@
 #include "caf/composable_behavior.hpp"
 #include "caf/typed_actor_pointer.hpp"
 #include "caf/scoped_execution_unit.hpp"
-#include "caf/typed_continue_helper.hpp"
 #include "caf/typed_response_promise.hpp"
 #include "caf/typed_event_based_actor.hpp"
 #include "caf/abstract_composable_behavior.hpp"
 
-#include "caf/decorator/adapter.hpp"
 #include "caf/decorator/sequencer.hpp"
 
+#include "caf/meta/type_name.hpp"
+#include "caf/meta/annotation.hpp"
+#include "caf/meta/save_callback.hpp"
+#include "caf/meta/load_callback.hpp"
+#include "caf/meta/omittable_if_empty.hpp"
+
+#include "caf/scheduler/test_coordinator.hpp"
 #include "caf/scheduler/abstract_coordinator.hpp"
 
 /// @author Dominik Charousset <dominik.charousset (at) haw-hamburg.de>

@@ -42,14 +42,17 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
     --lib-dir=DIR               library directory [build/lib]
     --with-clang=FILE           path to clang++ executable
     --with-gcc=FILE             path to g++ executable
+    --with-qt-prefix=PATH       prefix path for Qt5 cmake modules
     --dual-build                build using both gcc and clang
     --build-static              build as static and shared library
     --build-static-only         build as static library only
     --more-warnings             enables most warnings
     --no-compiler-check         disable compiler version check
     --no-auto-libc++            do not automatically enable libc++ for Clang
-    --no-exceptions             build CAF without C++ exceptions
-    --warnings-as-errors        enables -Werror
+    --no-exceptions             do not catch exceptions in CAF
+    --force-no-exceptions       build CAF with '-fno-exceptions'
+    --warnings-as-errors        build with '-Werror'
+    --with-ccache               use ccache to improve build performance
 
   Installation Directories:
     --prefix=PREFIX             installation directory [/usr/local]
@@ -85,6 +88,7 @@ Usage: $0 [OPTION]... [VAR=VALUE]...
   Influential Environment Variables (only on first invocation):
     CXX                         C++ compiler command
     CXXFLAGS                    C++ compiler flags
+    DEFAULT_CMAKE_GENERATOR     Selects a custom generator
 
   Python Build Options:
     --with-python-config=FILE   Use python-conf binary to determine includes and libs
@@ -179,14 +183,18 @@ configure ()
         cmake $CMakeCacheEntries "$sourcedir"
     fi
 
-    echo "# This is the command used to configure this build" > config.status
+    printf "#!/bin/sh\n\n" > config.status
+    printf "# Switch to the source of this build directory.\n" >> config.status
+    printf "cd \"$sourcedir\"\n\n" >> config.status
+    printf "# Invoke the command to configure this build.\n" >> config.status
     if [ -n "$CC" ]; then
-      printf "CC=%s" $CC >> config.status
-      printf ' ' >> config.status
+      printf "CC=\"%s\"\n" "$CC" >> config.status
     fi
     if [ -n "$CXX" ]; then
-      printf "CXX=%s" $CXX >> config.status
-      printf ' ' >> config.status
+      printf "CXX=\"%s\"\n" "$CXX" >> config.status
+    fi
+    if [ -n "$CXXFLAGS" ]; then
+      printf "CXXFLAGS=\"%s\"\n" "$CXXFLAGS" >> config.status
     fi
     echo $command >> config.status
     chmod u+x config.status
@@ -245,8 +253,15 @@ while [ $# -ne 0 ]; do
         --no-exceptions)
             append_cache_entry CAF_NO_EXCEPTIONS BOOL yes
             ;;
+        --force-no-exceptions)
+            append_cache_entry CAF_NO_EXCEPTIONS BOOL yes
+            append_cache_entry CAF_FORCE_NO_EXCEPTIONS BOOL yes
+            ;;
         --warnings-as-errors)
             append_cache_entry CAF_CXX_WARNINGS_AS_ERRORS BOOL yes
+            ;;
+        --with-ccache)
+            append_cache_entry CAF_USE_CCACHE BOOL yes
             ;;
         --sysroot=*)
             append_cache_entry CAF_OSX_SYSROOT PATH "$optarg"
@@ -287,6 +302,9 @@ while [ $# -ne 0 ]; do
             ;;
         --with-gcc=*)
             gcc=$optarg
+            ;;
+        --with-qt-prefix=*)
+            append_cache_entry CAF_QT_PREFIX_PATH STRING "$optarg"
             ;;
         --build-type=*)
             append_cache_entry CMAKE_BUILD_TYPE STRING $optarg
@@ -427,7 +445,7 @@ distclean:
 doc:
 	$(MAKE) -C $(firstword $(DIRS)) $@
 
-.PHONY: all test install uninstall clean distclean
+.PHONY: all test install uninstall clean distclean doc
 EOT
 `
 

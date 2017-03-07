@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -29,6 +29,9 @@ namespace caf {
 template <class... Sigs>
 class typed_actor_pointer {
 public:
+  /// Stores the template parameter pack.
+  using signatures = detail::type_list<Sigs...>;
+
   template <class Supertype>
   typed_actor_pointer(Supertype* selfptr) : view_(selfptr) {
     using namespace caf::detail;
@@ -39,12 +42,38 @@ public:
                   "cannot create a pointer view to an unrelated actor type");
   }
 
-  typed_actor_pointer(const std::nullptr_t&) : view_(nullptr) {
+  typed_actor_pointer(std::nullptr_t) : view_(nullptr) {
     // nop
   }
 
   typed_actor_view<Sigs...>* operator->() {
     return &view_;
+  }
+
+  inline explicit operator bool() const {
+    return static_cast<bool>(view_.internal_ptr());
+  }
+
+  /// @private
+  actor_control_block* get() const {
+    return view_.ctrl();
+  }
+
+  /// @private
+  scheduled_actor* internal_ptr() const {
+    return view_.internal_ptr();
+  }
+
+  template <class Supertype>
+  typed_actor_pointer& operator=(Supertype* ptr) {
+    using namespace caf::detail;
+    static_assert(tl_subset_of<
+                    type_list<Sigs...>,
+                    typename Supertype::signatures
+                  >::value,
+                  "cannot assign pointer of unrelated actor type");
+    view_ = ptr;
+    return *this;
   }
 
 private:

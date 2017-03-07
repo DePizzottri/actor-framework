@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -59,15 +59,15 @@ struct is_response_promise<delegated<Ts...>> : std::true_type { };
 template <class T>
 struct optional_message_visitor_enable_tpl {
   static constexpr bool value =
-      ! is_one_of<
+      !is_one_of<
         typename std::remove_const<T>::type,
         none_t,
         unit_t,
         skip_t,
         optional<skip_t>
       >::value
-      && ! is_message_id_wrapper<T>::value
-      && ! is_response_promise<T>::value;
+      && !is_message_id_wrapper<T>::value
+      && !is_response_promise<T>::value;
 };
 
 class optional_message_visitor : public static_visitor<optional<message>> {

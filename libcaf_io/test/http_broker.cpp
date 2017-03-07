@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -92,7 +92,7 @@ behavior http_worker(http_broker* self, connection_handle hdl) {
   self->configure_read(hdl, receive_policy::at_most(1024));
   return {
     [=](const new_data_msg& msg) {
-      assert(! msg.buf.empty());
+      assert(!msg.buf.empty());
       assert(msg.handle == hdl);
       // extract lines from received buffer
       auto& lines = self->state.lines;
@@ -171,8 +171,7 @@ behavior server(broker* self) {
 
 class fixture {
 public:
-  fixture() : system(cfg.load<io::middleman, network::test_multiplexer>()),
-              aut_(unsafe_actor_handle_init) {
+  fixture() : system(cfg.load<io::middleman, network::test_multiplexer>()) {
     mpx_ = dynamic_cast<network::test_multiplexer*>(&system.middleman().backend());
     CAF_REQUIRE(mpx_ != nullptr);
     // spawn the actor-under-test
@@ -183,7 +182,7 @@ public:
     // "open" a new connection to our server
     mpx_->add_pending_connect(acceptor_, connection_);
     mpx_->assign_tcp_scribe(aut_ptr_, connection_);
-    mpx_->accept_connection(acceptor_);
+    CAF_REQUIRE(mpx_->accept_connection(acceptor_));
   }
 
   ~fixture() {

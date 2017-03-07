@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -23,6 +23,10 @@
 #include <functional>
 #include <type_traits>
 
+#include "caf/result.hpp"
+#include "caf/message.hpp"
+#include "caf/message_view.hpp"
+
 namespace caf {
 
 template <class F>
@@ -31,7 +35,9 @@ struct catch_all {
 
   F handler;
 
-  catch_all(catch_all&&) = default;
+  catch_all(catch_all&& x) : handler(std::move(x.handler)) {
+    // nop
+  }
 
   template <class T>
   catch_all(T&& x) : handler(std::forward<T>(x)) {

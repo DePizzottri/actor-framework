@@ -1,5 +1,8 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 2.8.4)
 project(caf C CXX)
+
+# be nice to vim users
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 # silence policy CMP0042 warning by enabling RPATH explicitly
 if(APPLE AND NOT DEFINED CMAKE_MACOSX_RPATH)
@@ -11,6 +14,37 @@ if(WIN32 AND NOT CAF_BUILD_STATIC_ONLY)
   message(STATUS "CAF currently only supports static-only builds on Windows")
   set(CAF_BUILD_STATIC_ONLY yes)
 endif()
+
+################################################################################
+#                        set included flags if needed                          #
+################################################################################
+
+if(CAF_FORCE_NO_EXCEPTIONS)
+  set(CAF_NO_EXCEPTIONS yes)
+endif()
+
+################################################################################
+#                        set prefix paths if available                         #
+################################################################################
+
+if(DEFINED CAF_QT_PREFIX_PATH)
+  set(CMAKE_PREFIX_PATH "${CAF_QT_PREFIX_PATH}")
+endif()
+
+################################################################################
+#                      enable ccache if required by user                       #
+################################################################################
+
+if(CAF_USE_CCACHE)
+  find_program(CCACHE_PROGRAM ccache)
+  if(CCACHE_PROGRAM)
+    message(STATUS "Using ccache command: ${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${CCACHE_PROGRAM}")
+  else()
+    message(STATUS "Unable to find ccache")
+  endif()
+endif(CAF_USE_CCACHE)
 
 ################################################################################
 #   make sure all variables are set to "no" if undefined for summary output    #
@@ -146,7 +180,16 @@ if(CAF_CXX_WARNINGS_AS_ERRORS)
 endif()
 # set compiler flags for GCOV if requested
 if(CAF_ENABLE_GCOV)
-  set(EXTRA_FLAGS "${EXTRA_FLAGS} -fprofile-arcs -ftest-coverage")
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    set(NO_INLINE "-fno-inline")
+  else()
+    set(NO_INLINE "-fno-inline -fno-inline-small-functions -fno-default-inline")
+  endif()
+  set(EXTRA_FLAGS "${EXTRA_FLAGS} -fprofile-arcs -ftest-coverage ${NO_INLINE}")
+endif()
+# set -fno-exception if requested
+if(CAF_FORCE_NO_EXCEPTIONS)
+  set(EXTRA_FLAGS "${EXTRA_FLAGS} -fno-exceptions")
 endif()
 # enable a ton of warnings if --more-clang-warnings is used
 if(CAF_MORE_WARNINGS)
@@ -223,7 +266,7 @@ endif(CAF_ENABLE_ADDRESS_SANITIZER)
 if(NOT APPLE AND NOT WIN32)
   set(EXTRA_FLAGS "${EXTRA_FLAGS} -pthread")
 endif()
-# -fPIC generates warnings on MinGW plus extra setup steps needed on MinGW
+# -fPIC generates warnings on MinGW and Cygwin plus extra setup steps needed on MinGW
 if(MINGW)
   add_definitions(-D_WIN32_WINNT=0x0600)
   add_definitions(-DWIN32)
@@ -231,6 +274,8 @@ if(MINGW)
   set(LD_FLAGS "ws2_32 -liphlpapi")
   # build static to avoid runtime dependencies to GCC libraries
   set(EXTRA_FLAGS "${EXTRA_FLAGS} -static")
+elseif(CYGWIN)
+  set(EXTRA_FLAGS "${EXTRA_FLAGS} -U__STRICT_ANSI__")
 else()
   set(EXTRA_FLAGS "${EXTRA_FLAGS} -fPIC")
 endif()
@@ -538,32 +583,37 @@ set(MANUAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/manual")
 if(EXISTS "${MANUAL_DIR}"
    AND EXISTS "${MANUAL_DIR}/variables.tex.in"
    AND EXISTS "${MANUAL_DIR}/conf.py.in")
-  # retrieve current branch name
+  # retrieve current branch name for CAF
   execute_process(COMMAND git rev-parse --abbrev-ref HEAD
                   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                   OUTPUT_VARIABLE GIT_BRANCH
                   OUTPUT_STRIP_TRAILING_WHITESPACE)
-  # retrieve current SHA1 hash
+  # retrieve current SHA1 hash for CAF
   execute_process(COMMAND git log --pretty=format:%h -n 1
                   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                  OUTPUT_VARIABLE GIT_HASH
+                  OUTPUT_VARIABLE CAF_SHA
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
+  # retrieve current SHA1 hash for the Manual
+  execute_process(COMMAND git log --pretty=format:%h -n 1
+                  WORKING_DIRECTORY ${MANUAL_DIR}
+                  OUTPUT_VARIABLE CAF_MANUAL_SHA
                   OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(${GIT_BRANCH} STREQUAL "master")
-    # retrieve current tag name
-    execute_process(COMMAND git describe --tags --contains ${GIT_HASH}
+    # retrieve current tag name for CAF
+    execute_process(COMMAND git describe --tags --contains ${CAF_SHA}
                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                     RESULT_VARIABLE GIT_TAG_RES
                     OUTPUT_VARIABLE GIT_TAG
                     ERROR_QUIET
                     OUTPUT_STRIP_TRAILING_WHITESPACE)
-    # prefer tag name over regular version
+    # prefer tag name over auto-generated version
     if("${GIT_TAG_RES}" STREQUAL "0")
       set(CAF_RELEASE "${GIT_TAG}")
     else()
       set(CAF_RELEASE "${CAF_VERSION}")
     endif()
   else()
-    set(CAF_RELEASE "${CAF_VERSION}+exp.sha.${GIT_HASH}")
+    set(CAF_RELEASE "${CAF_VERSION}+exp.sha.${CAF_SHA}")
   endif()
   MESSAGE(STATUS "Set manual version to ${CAF_RELEASE}")
   configure_file("${MANUAL_DIR}/variables.tex.in"
@@ -571,6 +621,12 @@ if(EXISTS "${MANUAL_DIR}"
                  IMMEDIATE @ONLY)
   configure_file("${MANUAL_DIR}/conf.py.in"
                  "${MANUAL_DIR}/conf.py"
+                 IMMEDIATE @ONLY)
+  configure_file("${MANUAL_DIR}/index_header.rst.in"
+                 "${MANUAL_DIR}/index_header.rst"
+                 IMMEDIATE @ONLY)
+  configure_file("${MANUAL_DIR}/index_footer.rst.in"
+                 "${MANUAL_DIR}/index_footer.rst"
                  IMMEDIATE @ONLY)
 endif()
 

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -39,9 +39,12 @@ namespace {
 using rtti_pair = std::pair<uint16_t, const std::type_info*>;
 
 std::string to_string(const rtti_pair& x) {
-  if (x.second)
-    return deep_to_string_as_tuple(x.first, x.second->name());
-  return deep_to_string_as_tuple(x.first, "<null>");
+  std::string result = "(";
+  result += std::to_string(x.first);
+  result += ", ";
+  result += x.second != nullptr ? x.second->name() : "<null>";
+  result += ")";
+  return result;
 }
 
 struct fixture {
@@ -127,6 +130,31 @@ CAF_TEST(atom_constants) {
   CAF_CHECK_EQUAL(invoke(expr, atom_value{ok_atom::value}), -1);
   CAF_CHECK_EQUAL(invoke(expr, atom_value{hi_atom::value}), 0);
   CAF_CHECK_EQUAL(invoke(expr, atom_value{ho_atom::value}), 1);
+}
+
+CAF_TEST(manual_matching) {
+  using foo_atom = atom_constant<atom("foo")>;
+  using bar_atom = atom_constant<atom("bar")>;
+  auto msg1 = make_message(foo_atom::value, 42);
+  auto msg2 = make_message(bar_atom::value, 42);
+  CAF_MESSAGE("check individual message elements");
+  CAF_CHECK((msg1.match_element<int>(1)));
+  CAF_CHECK((msg2.match_element<int>(1)));
+  CAF_CHECK((msg1.match_element<foo_atom>(0)));
+  CAF_CHECK((!msg2.match_element<foo_atom>(0)));
+  CAF_CHECK((!msg1.match_element<bar_atom>(0)));
+  CAF_CHECK((msg2.match_element<bar_atom>(0)));
+  CAF_MESSAGE("check matching whole tuple");
+  CAF_CHECK((msg1.match_elements<foo_atom, int>()));
+  CAF_CHECK(!(msg2.match_elements<foo_atom, int>()));
+  CAF_CHECK(!(msg1.match_elements<bar_atom, int>()));
+  CAF_CHECK((msg2.match_elements<bar_atom, int>()));
+  CAF_CHECK((msg1.match_elements<atom_value, int>()));
+  CAF_CHECK((msg2.match_elements<atom_value, int>()));
+  CAF_CHECK(!(msg1.match_elements<atom_value, double>()));
+  CAF_CHECK(!(msg2.match_elements<atom_value, double>()));
+  CAF_CHECK(!(msg1.match_elements<atom_value, int, int>()));
+  CAF_CHECK(!(msg2.match_elements<atom_value, int, int>()));
 }
 
 CAF_TEST_FIXTURE_SCOPE_END()

@@ -53,8 +53,8 @@ Coding Style
 ============
 
 When contributing source code, please adhere to the following coding style,
-whwich is loosely based on the [Google C++ Style
-Guide](http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml) and the
+which is loosely based on the [Google C++ Style
+Guide](https://google.github.io/styleguide/cppguide.html) and the
 coding conventions used by the C++ Standard Library.
 
 
@@ -210,15 +210,6 @@ General
 
 - Keywords are always followed by a whitespace: `if (...)`, `template <...>`,
   `while (...)`, etc.
-
-- Leave a whitespace after `!` to make negations easily recognizable:
-
-  ```cpp
-  if (! sunny())
-    stay_home();
-  else 
-    go_outside();
-  ```
 
 - Opening braces belong to the same line:
 

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,7 +19,18 @@
 
 #include "caf/atom.hpp"
 
+#include <cstring>
+
 namespace caf {
+
+atom_value atom_from_string(const std::string& x) {
+  if (x.size() > 10)
+    return atom("");
+  char buf[11];
+  memcpy(buf, x.c_str(), x.size());
+  buf[x.size()] = '\0';
+  return atom(buf);
+}
 
 std::string to_string(const atom_value& what) {
   auto x = static_cast<uint64_t>(what);

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -49,9 +49,10 @@ public:
 /// @extends local_actor
 class event_based_actor : public extend<scheduled_actor,
                                         event_based_actor>::
-                                 with<mixin::sender, mixin::requester,
-                                      mixin::behavior_changer,
-                                      mixin::subscriber>,
+                                 with<mixin::sender,
+                                      mixin::requester,
+                                      mixin::subscriber,
+                                      mixin::behavior_changer>,
                           public dynamically_typed_actor_base {
 public:
   // -- member types -----------------------------------------------------------
@@ -66,7 +67,7 @@ public:
 
   explicit event_based_actor(actor_config& cfg);
 
-  ~event_based_actor();
+  ~event_based_actor() override;
 
   // -- overridden functions of local_actor ------------------------------------
 

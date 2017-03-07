@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -55,40 +55,38 @@ intptr_t group::compare(const group& other) const noexcept {
   return compare(ptr_.get(), other.ptr_.get());
 }
 
-void serialize(serializer& sink, const group& x, const unsigned int) {
+error inspect(serializer& f, group& x) {
+  std::string mod_name;
   auto ptr = x.get();
-  if (! ptr) {
-    std::string dummy;
-    sink << dummy;
-  } else {
-    sink << ptr->module().name();
-    ptr->save(sink);
-  }
+  if (ptr == nullptr)
+    return f(mod_name);
+  mod_name = ptr->module().name();
+  auto e = f(mod_name);
+  return e ? e : ptr->save(f);
 }
 
-void serialize(deserializer& source, group& x, const unsigned int) {
+error inspect(deserializer& f, group& x) {
   std::string module_name;
-  source >> module_name;
+  f(module_name);
   if (module_name.empty()) {
     x = invalid_group;
-    return;
+    return none;
   }
-  if (! source.context())
-    CAF_RAISE_ERROR("Cannot serialize group without context.");
-  auto& sys = source.context()->system();
+  if (f.context() == nullptr)
+    return sec::no_context;
+  auto& sys = f.context()->system();
   auto mod = sys.groups().get_module(module_name);
-  if (! mod)
-    CAF_RAISE_ERROR("Cannot deserialize a group for unknown module: "
-                    + module_name);
-  mod->load(source, x);
+  if (!mod)
+    return sec::no_such_group_module;
+  return mod->load(f, x);
 }
 
 std::string to_string(const group& x) {
   if (x == invalid_group)
     return "<invalid-group>";
-  std::string result = x->module().name();
-  result += "/";
-  result += x->identifier();
+  std::string result = x.get()->module().name();
+  result += ":";
+  result += x.get()->identifier();
   return result;
 }
 

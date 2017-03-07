@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -42,7 +42,7 @@ void monitorable_actor::attach(attachable_ptr ptr) {
   CAF_ASSERT(ptr);
   error fail_state;
   auto attached = exclusive_critical_section([&] {
-    if (is_terminated()) {
+    if (getf(is_terminated_flag)) {
       fail_state = fail_state_;
       return false;
     }
@@ -50,7 +50,7 @@ void monitorable_actor::attach(attachable_ptr ptr) {
     return true;
   });
   CAF_LOG_DEBUG("cannot attach functor to terminated actor: call immediately");
-  if (! attached)
+  if (!attached)
     ptr->actor_exited(fail_state, nullptr);
 }
 
@@ -64,7 +64,7 @@ bool monitorable_actor::cleanup(error&& reason, execution_unit* host) {
   CAF_LOG_TRACE(CAF_ARG(reason));
   attachable_ptr head;
   bool set_fail_state = exclusive_critical_section([&]() -> bool {
-    if (! is_cleaned_up()) {
+    if (!getf(is_cleaned_up_flag)) {
       // local actors pass fail_state_ as first argument
       if (&fail_state_ != &reason)
         fail_state_ = std::move(reason);
@@ -75,7 +75,7 @@ bool monitorable_actor::cleanup(error&& reason, execution_unit* host) {
     }
     return false;
   });
-  if (! set_fail_state)
+  if (!set_fail_state)
     return false;
   CAF_LOG_INFO("cleanup" << CAF_ARG(id())
                << CAF_ARG(node()) << CAF_ARG(reason));
@@ -83,7 +83,7 @@ bool monitorable_actor::cleanup(error&& reason, execution_unit* host) {
   for (attachable* i = head.get(); i != nullptr; i = i->next.get())
     i->actor_exited(reason, host);
   // tell printer to purge its state for us if we ever used aout()
-  if (get_flag(abstract_actor::has_used_aout_flag)) {
+  if (getf(abstract_actor::has_used_aout_flag)) {
     auto pr = home_system().scheduler().printer();
     pr->enqueue(make_mailbox_element(nullptr, message_id::make(), {},
                                       delete_atom::value, id()),
@@ -138,7 +138,7 @@ bool monitorable_actor::establish_link_impl(abstract_actor* x) {
   bool send_exit_immediately = false;
   auto tmp = default_attachable::make_link(address(), x->address());
   auto success = exclusive_critical_section([&]() -> bool {
-    if (is_terminated()) {
+    if (getf(is_terminated_flag)) {
       fail_state = fail_state_;
       send_exit_immediately = true;
       return false;
@@ -165,7 +165,7 @@ bool monitorable_actor::establish_backlink_impl(abstract_actor* x) {
                                        default_attachable::link};
   auto tmp = default_attachable::make_link(address(), x->address());
   auto success = exclusive_critical_section([&]() -> bool {
-    if (is_terminated()) {
+    if (getf(is_terminated_flag)) {
       fail_state = fail_state_;
       send_exit_immediately = true;
       return false;
@@ -206,12 +206,12 @@ size_t monitorable_actor::detach_impl(const attachable::token& what,
                                       attachable_ptr& ptr, bool stop_on_hit,
                                       bool dry_run) {
   CAF_LOG_TRACE("");
-  if (! ptr) {
+  if (!ptr) {
     CAF_LOG_DEBUG("invalid ptr");
     return 0;
   }
   if (ptr->matches(what)) {
-    if (! dry_run) {
+    if (!dry_run) {
       CAF_LOG_DEBUG("removed element");
       attachable_ptr next;
       next.swap(ptr->next);
@@ -226,14 +226,15 @@ bool monitorable_actor::handle_system_message(mailbox_element& x,
                                               execution_unit* ctx,
                                               bool trap_exit) {
   auto& msg = x.content();
-  if (! trap_exit && msg.size() == 1 && msg.match_element<exit_msg>(0)) {
+  if (!trap_exit && msg.size() == 1 && msg.match_element<exit_msg>(0)) {
     // exits for non-normal exit reasons
     auto& em = msg.get_mutable_as<exit_msg>(0);
     if (em.reason)
       cleanup(std::move(em.reason), ctx);
     return true;
-  } else if (msg.size() > 1 && msg.match_element<sys_atom>(0)) {
-    if (! x.sender)
+  }
+  if (msg.size() > 1 && msg.match_element<sys_atom>(0)) {
+    if (!x.sender)
       return true;
     error err;
     mailbox_element_ptr res;
@@ -249,7 +250,7 @@ bool monitorable_actor::handle_system_message(mailbox_element& x,
                                     strong_actor_ptr{ctrl()}, name());
       }
     );
-    if (! res && ! err)
+    if (!res && !err)
       err = sec::unsupported_sys_message;
     if (err && x.mid.is_request())
       res = make_mailbox_element(ctrl(), x.mid.response_id(),

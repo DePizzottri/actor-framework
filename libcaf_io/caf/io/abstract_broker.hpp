@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -77,7 +77,7 @@ class middleman;
 class abstract_broker : public scheduled_actor,
                         public prohibit_top_level_spawn_marker {
 public:
-  virtual ~abstract_broker();
+  ~abstract_broker() override;
 
   // even brokers need friends
   friend class scribe;
@@ -103,10 +103,43 @@ public:
 
   // -- modifiers --------------------------------------------------------------
 
+  /// Suspends activities on `hdl` unconditionally.
+  template <class Handle>
+  void halt(Handle hdl) {
+    auto ref = by_id(hdl);
+    if (ref)
+      ref->halt();
+  }
+
+  /// Allows activities on `hdl` unconditionally (default).
+  template <class Handle>
+  void trigger(Handle hdl) {
+    auto ref = by_id(hdl);
+    if (ref)
+      ref->trigger();
+  }
+
+  /// Allows `num_events` activities on `hdl`.
+  template <class Handle>
+  void trigger(Handle hdl, size_t num_events) {
+    auto ref = by_id(hdl);
+    if (!ref)
+      return;
+    if (num_events > 0) {
+      ref->trigger(num_events);
+    } else {
+      // if we have any number of activity tokens, ignore this call
+      // otherwise (currently in unconditional receive state) halt
+      auto x = ref->activity_tokens();
+      if (!x)
+        ref->halt();
+    }
+  }
+
   /// Modifies the receive policy for given connection.
   /// @param hdl Identifies the affected connection.
-  /// @param config Contains the new receive policy.
-  void configure_read(connection_handle hdl, receive_policy::config config);
+  /// @param cfg Contains the new receive policy.
+  void configure_read(connection_handle hdl, receive_policy::config cfg);
 
   /// Enables or disables write notifications for given connection.
   void ack_writes(connection_handle hdl, bool enable);
@@ -115,7 +148,7 @@ public:
   std::vector<char>& wr_buf(connection_handle hdl);
 
   /// Writes `data` into the buffer for given connection.
-  void write(connection_handle hdl, size_t data_size, const void* data);
+  void write(connection_handle hdl, size_t bs, const void* buf);
 
   /// Sends the content of the buffer for given connection.
   void flush(connection_handle hdl);
@@ -131,7 +164,7 @@ public:
   /// Tries to connect to `host` on given `port` and creates
   /// a new scribe describing the connection afterwards.
   /// @returns The handle of the new `scribe` on success.
-  expected<connection_handle> add_tcp_scribe(const std::string& host, uint16_t port);
+  expected<connection_handle> add_tcp_scribe(const std::string& hostname, uint16_t port);
 
   /// Assigns a detached `scribe` instance identified by `hdl`
   /// from the `multiplexer` to this broker.
@@ -182,8 +215,12 @@ public:
   /// Closes the connection or acceptor identified by `handle`.
   /// Unwritten data will still be send.
   template <class Handle>
-  void close(Handle hdl) {
-    by_id(hdl).stop_reading();
+  bool close(Handle hdl) {
+    auto x = by_id(hdl);
+    if (!x)
+      return false;
+    x->stop_reading();
+    return true;
   }
 
   /// Checks whether `hdl` is assigned to broker.
@@ -255,11 +292,11 @@ protected:
 
   /// Returns a `scribe` or `doorman` identified by `hdl`.
   template <class Handle>
-  auto by_id(Handle hdl) -> decltype(*ptr_of(hdl)) {
+  auto by_id(Handle hdl) -> optional<decltype(*ptr_of(hdl))> {
     auto& elements = get_map(hdl);
     auto i = elements.find(hdl);
     if (i == elements.end())
-      CAF_RAISE_ERROR("invalid handle");
+      return none;
     return *(i->second);
   }
 
@@ -272,7 +309,7 @@ protected:
     decltype(ptr_of(hdl)) result;
     auto i = elements.find(hdl);
     if (i == elements.end())
-      CAF_RAISE_ERROR("invalid handle");
+      return nullptr;
     swap(result, i->second);
     elements.erase(i);
     return result;
@@ -282,6 +319,7 @@ private:
   scribe_map scribes_;
   doorman_map doormen_;
   detail::intrusive_partitioned_list<mailbox_element, detail::disposer> cache_;
+  std::vector<char> dummy_wr_buf_;
 };
 
 } // namespace io

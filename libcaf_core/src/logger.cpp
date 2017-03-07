@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -19,7 +19,6 @@
 
 #include "caf/logger.hpp"
 
-#include <ctime>
 #include <thread>
 #include <cstring>
 #include <fstream>
@@ -36,9 +35,12 @@
 
 #include "caf/string_algorithms.hpp"
 
+#include "caf/term.hpp"
 #include "caf/locks.hpp"
+#include "caf/timestamp.hpp"
 #include "caf/actor_proxy.hpp"
 #include "caf/actor_system.hpp"
+#include "caf/actor_system_config.hpp"
 
 #include "caf/detail/get_process_id.hpp"
 #include "caf/detail/single_reader_queue.hpp"
@@ -56,39 +58,62 @@ constexpr const char* log_level_name[] = {
 };
 
 #ifdef CAF_LOG_LEVEL
+
 static_assert(CAF_LOG_LEVEL >= 0 && CAF_LOG_LEVEL <= 4,
               "assertion: 0 <= CAF_LOG_LEVEL <= 4");
 
-constexpr int global_log_level = CAF_LOG_LEVEL;
-
 #ifdef CAF_MSVC
-thread_local
-#else
-__thread
-#endif
-actor_system* current_logger_system_ptr = nullptr;
 
-inline actor_system* current_logger_system() {
-  return current_logger_system_ptr;
-}
+thread_local intrusive_ptr<logger> current_logger;
 
-inline void current_logger_system(actor_system* x) {
-  current_logger_system_ptr = x;
+inline void set_current_logger(logger* x) {
+  current_logger.reset(x);
 }
 
 inline logger* get_current_logger() {
-  auto sys = current_logger_system();
-  return sys ? &sys->logger() : nullptr;
+  return current_logger.get();
 }
-#else
-inline void current_logger_system(actor_system*) {
+
+#else // CAF_MSVC
+
+pthread_key_t s_key;
+pthread_once_t s_key_once = PTHREAD_ONCE_INIT;
+
+void logger_ptr_destructor(void* ptr) {
+  if (ptr) {
+    intrusive_ptr_release(reinterpret_cast<logger*>(ptr));
+  }
+}
+
+void make_logger_ptr() {
+  pthread_key_create(&s_key, logger_ptr_destructor);
+}
+
+void set_current_logger(logger* x) {
+  pthread_once(&s_key_once, make_logger_ptr);
+  logger_ptr_destructor(pthread_getspecific(s_key));
+  if (x)
+    intrusive_ptr_add_ref(x);
+  pthread_setspecific(s_key, x);
+}
+
+logger* get_current_logger() {
+  pthread_once(&s_key_once, make_logger_ptr);
+  return reinterpret_cast<logger*>(pthread_getspecific(s_key));
+}
+
+#endif // CAF_MSVC
+
+#else // CAF_LOG_LEVEL
+
+inline void set_current_logger(logger*) {
   // nop
 }
 
 inline logger* get_current_logger() {
   return nullptr;
 }
-#endif
+#endif // CAF_LOG_LEVEL
 
 void prettify_type_name(std::string& class_name) {
   //replace_all(class_name, " ", "");
@@ -108,13 +133,15 @@ void prettify_type_name(std::string& class_name) {
   };
   char prefix1[] = "caf.detail.embedded<";
   strip_magic(prefix1, prefix1 + (sizeof(prefix1) - 1));
+  // finally, replace any whitespace with %20
+  replace_all(class_name, " ", "%20");
 }
 
 void prettify_type_name(std::string& class_name, const char* c_class_name) {
 # if defined(CAF_LINUX) || defined(CAF_MACOS)
   int stat = 0;
   std::unique_ptr<char, decltype(free)*> real_class_name{nullptr, free};
-  auto tmp = abi::__cxa_demangle(c_class_name, 0, 0, &stat);
+  auto tmp = abi::__cxa_demangle(c_class_name, nullptr, nullptr, &stat);
   real_class_name.reset(tmp);
   class_name = stat == 0 ? real_class_name.get() : c_class_name;
 # else
@@ -125,10 +152,13 @@ void prettify_type_name(std::string& class_name, const char* c_class_name) {
 
 } // namespace <anonymous>
 
-logger::event::event(std::string x)
+logger::event::event(int l, const char* c, std::string p, std::string m)
     : next(nullptr),
       prev(nullptr),
-      msg(std::move(x)) {
+      level(l),
+      component(c),
+      prefix(std::move(p)),
+      msg(std::move(m)) {
   // nop
 }
 
@@ -137,7 +167,7 @@ logger::line_builder::line_builder() : behind_arg_(false) {
 }
 
 logger::line_builder& logger::line_builder::operator<<(const std::string& str) {
-  if (! str_.empty())
+  if (!str_.empty())
     str_ += " ";
   str_ += str;
   behind_arg_ = false;
@@ -145,7 +175,7 @@ logger::line_builder& logger::line_builder::operator<<(const std::string& str) {
 }
 
 logger::line_builder& logger::line_builder::operator<<(const char* str) {
-  if (! str_.empty())
+  if (!str_.empty())
     str_ += " ";
   str_ += str;
   behind_arg_ = false;
@@ -219,11 +249,10 @@ actor_id logger::thread_local_aid(actor_id aid) {
   return 0; // was empty before
 }
 
-void logger::log(int level, const char* component,
-                 const std::string& class_name, const char* function_name,
-                 const char* c_full_file_name, int line_num,
-                 const std::string& msg) {
-  CAF_ASSERT(level >= 0 && level <= 4);
+void logger::log_prefix(std::ostream& out, int level, const char* component,
+                        const std::string& class_name,
+                        const char* function_name, const char* c_full_file_name,
+                        int line_num, const std::thread::id& tid) {
   std::string file_name;
   std::string full_file_name = c_full_file_name;
   auto ri = find(full_file_name.rbegin(), full_file_name.rend(), '/');
@@ -236,18 +265,33 @@ void logger::log(int level, const char* component,
   } else {
     file_name = std::move(full_file_name);
   }
-  auto t0 = std::chrono::high_resolution_clock::now().time_since_epoch();
-  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t0).count();
-  std::ostringstream line;
-  line << ms << " " << component << " " << log_level_name[level] << " "
-       << "actor" << thread_local_aid() << " " << std::this_thread::get_id()
-       << " " << class_name << " " << function_name << " " << file_name << ":"
-       << line_num << " " << msg << std::endl;
-  queue_.synchronized_enqueue(queue_mtx_, queue_cv_, new event{line.str()});
+  std::ostringstream prefix;
+  out << timestamp_to_string(make_timestamp()) << " " << component << " "
+      << log_level_name[level] << " "
+      << "actor" << thread_local_aid() << " " << tid << " "
+      << class_name << " " << function_name << " "
+      << file_name << ":" << line_num;
+}
+
+void logger::log(int level, const char* component,
+                 const std::string& class_name, const char* function_name,
+                 const char* c_full_file_name, int line_num,
+                 const std::string& msg) {
+  CAF_ASSERT(level >= 0 && level <= 4);
+  if (level > level_)
+    return;
+  std::ostringstream prefix;
+  log_prefix(prefix, level, component, class_name, function_name,
+             c_full_file_name, line_num);
+  queue_.synchronized_enqueue(queue_mtx_, queue_cv_,
+                              new event{level, component, prefix.str(), msg});
 }
 
 void logger::set_current_actor_system(actor_system* x) {
-  current_logger_system(x);
+  if (x != nullptr)
+    set_current_logger(&x->logger());
+  else
+    set_current_logger(nullptr);
 }
 
 logger* logger::current_logger() {
@@ -259,25 +303,99 @@ void logger::log_static(int level, const char* component,
                         const char* function_name, const char* file_name,
                         int line_num, const std::string& msg) {
   auto ptr = get_current_logger();
-  if (ptr)
+  if (ptr != nullptr)
     ptr->log(level, component, class_name, function_name, file_name, line_num,
              msg);
 }
 
 logger::~logger() {
-  // nop
+  stop();
+  // tell system our dtor is done
+  std::unique_lock<std::mutex> guard{system_.logger_dtor_mtx_};
+  system_.logger_dtor_done_ = true;
+  system_.logger_dtor_cv_.notify_one();
 }
 
 logger::logger(actor_system& sys) : system_(sys) {
   // nop
 }
 
+void logger::init(actor_system_config& cfg) {
+  CAF_IGNORE_UNUSED(cfg);
+#if defined(CAF_LOG_LEVEL)
+  auto lvl_atom = cfg.logger_verbosity;
+  switch (static_cast<uint64_t>(lvl_atom)) {
+    case error_log_lvl_atom::uint_value():
+      level_ = CAF_LOG_LEVEL_ERROR;
+      break;
+    case warning_log_lvl_atom::uint_value():
+      level_ = CAF_LOG_LEVEL_WARNING;
+      break;
+    case info_log_lvl_atom::uint_value():
+      level_ = CAF_LOG_LEVEL_INFO;
+      break;
+    case debug_log_lvl_atom::uint_value():
+      level_ = CAF_LOG_LEVEL_DEBUG;
+      break;
+    case trace_log_lvl_atom::uint_value():
+      level_ = CAF_LOG_LEVEL_TRACE;
+      break;
+    default: {
+      level_ = CAF_LOG_LEVEL;
+    }
+  }
+#endif
+}
+
 void logger::run() {
-  std::ostringstream fname;
-  fname << "actor_log_" << detail::get_process_id() << "_" << time(0)
-        << "_" << to_string(system_.node())
-        << ".log";
-  std::fstream out(fname.str().c_str(), std::ios::out | std::ios::app);
+#if defined(CAF_LOG_LEVEL)
+  std::fstream file;
+  if (system_.config().logger_filename.empty()) {
+    // If the console is also disabled, no need to continue.
+    if (!(system_.config().logger_console == atom("UNCOLORED")
+          || system_.config().logger_console == atom("COLORED")))
+      return;
+  } else {
+    auto f = system_.config().logger_filename;
+    // Replace placeholders.
+    const char pid[] = "[PID]";
+    auto i = std::search(f.begin(), f.end(), std::begin(pid),
+                         std::end(pid) - 1);
+    if (i != f.end()) {
+      auto id = std::to_string(detail::get_process_id());
+      f.replace(i, i + sizeof(pid) - 1, id);
+    }
+    const char ts[] = "[TIMESTAMP]";
+    i = std::search(f.begin(), f.end(), std::begin(ts), std::end(ts) - 1);
+    if (i != f.end()) {
+      auto now = timestamp_to_string(make_timestamp());
+      f.replace(i, i + sizeof(ts) - 1, now);
+    }
+    const char node[] = "[NODE]";
+    i = std::search(f.begin(), f.end(), std::begin(node), std::end(node) - 1);
+    if (i != f.end()) {
+      auto nid = to_string(system_.node());
+      f.replace(i, i + sizeof(node) - 1, nid);
+    }
+    file.open(f, std::ios::out | std::ios::app);
+    if (!file) {
+      std::cerr << "unable to open log file " << f << std::endl;
+      return;
+    }
+  }
+  if (file) {
+    // log first entry
+    constexpr atom_value level_names[] = {
+      error_log_lvl_atom::value, warning_log_lvl_atom::value,
+      info_log_lvl_atom::value, debug_log_lvl_atom::value,
+      trace_log_lvl_atom::value};
+    auto lvl_atom = level_names[CAF_LOG_LEVEL];
+    log_prefix(file, CAF_LOG_LEVEL_INFO, "caf", "caf.logger", "start",
+               __FILE__, __LINE__, parent_thread_);
+    file << " level = " << to_string(lvl_atom) << ", node = "
+         << to_string(system_.node()) << std::endl;
+  }
+  // receive log entries from other threads and actors
   std::unique_ptr<event> ptr;
   for (;;) {
     // make sure we have data to read
@@ -285,31 +403,70 @@ void logger::run() {
     // read & process event
     ptr.reset(queue_.try_pop());
     CAF_ASSERT(ptr != nullptr);
-    if (ptr->msg.empty()) {
-      out.close();
-      return;
+    // empty message means: shut down
+    if (ptr->msg.empty())
+      break;
+    // TODO: once we've phased out GCC 4.8, we can upgrade this to a regex.
+    // Until then, we just search for a substring in the filter.
+    auto& filter = system_.config().logger_filter;
+    if (!filter.empty()) {
+      auto it = std::search(filter.begin(), filter.end(), ptr->component,
+                            ptr->component + std::strlen(ptr->component));
+      if (it == filter.end())
+        continue;
     }
-    out << ptr->msg << std::flush;
+    if (file)
+      file << ptr->prefix << ' ' << ptr->msg << std::endl;
+    if (system_.config().logger_console == atom("UNCOLORED")) {
+      std::clog << ptr->msg << std::endl;
+    } else if  (system_.config().logger_console == atom("COLORED")) {
+      switch (ptr->level) {
+        default:
+          break;
+        case CAF_LOG_LEVEL_ERROR:
+          std::clog << term::red;;
+          break;
+        case CAF_LOG_LEVEL_WARNING:
+          std::clog << term::yellow;
+          break;
+        case CAF_LOG_LEVEL_INFO:
+          std::clog << term::green;
+          break;
+        case CAF_LOG_LEVEL_DEBUG:
+          std::clog << term::cyan;
+          break;
+        case CAF_LOG_LEVEL_TRACE:
+          std::clog << term::blue;
+          break;
+      }
+      std::clog << ptr->msg << term::reset << std::endl;
+    }
   }
+  if (file) {
+    log_prefix(file, CAF_LOG_LEVEL_INFO, "caf", "caf.logger", "stop",
+               __FILE__, __LINE__, parent_thread_);
+    file << " EOF" << std::endl;
+  }
+#endif
 }
 
 void logger::start() {
-# ifdef CAF_LOG_LEVEL
-  const char* log_level_table[] = {"ERROR", "WARN", "INFO", "DEBUG", "TRACE"};
+#if defined(CAF_LOG_LEVEL)
+  parent_thread_ = std::this_thread::get_id();
+  if (system_.config().logger_verbosity == quiet_log_lvl_atom::value)
+    return;
   thread_ = std::thread{[this] { this->run(); }};
-  std::string msg = "ENTRY log level = ";
-  msg += log_level_table[global_log_level];
-  log(4, "caf", "caf::logger", "run", __FILE__, __LINE__, msg);
-# endif
+#endif
 }
 
 void logger::stop() {
-# ifdef CAF_LOG_LEVEL
-  log(4, "caf", "caf::logger", "run", __FILE__, __LINE__, "EXIT");
+#if defined(CAF_LOG_LEVEL)
+  if (!thread_.joinable())
+    return;
   // an empty string means: shut down
-  queue_.synchronized_enqueue(queue_mtx_, queue_cv_, new event{""});
+  queue_.synchronized_enqueue(queue_mtx_, queue_cv_, new event);
   thread_.join();
-# endif
+#endif
 }
 
 } // namespace caf

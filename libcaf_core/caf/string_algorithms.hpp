@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -48,7 +48,7 @@ void split(Container& result, const std::string& str, const Delim& delims,
   while ((pos = str.find_first_of(delims, prev)) != std::string::npos) {
     if (pos > prev) {
       auto substr = str.substr(prev, pos - prev);
-      if (! substr.empty() || keep_all) {
+      if (!substr.empty() || keep_all) {
         result.push_back(std::move(substr));
       }
     }
@@ -131,7 +131,16 @@ void replace_all(std::string& str,
 
 template<size_t S>
 bool starts_with(const std::string& str, const char (&prefix)[S]) {
-  return str.compare(0, S, prefix);
+  return str.compare(0, S - 1, prefix) == 0;
+}
+
+template <size_t S>
+bool ends_with(const std::string& str, const char (&suffix)[S]) {
+  auto n = str.size();
+  auto m = S - 1;
+  if (n >= m)
+    return str.compare(n - m, m, suffix) == 0;
+  return false;
 }
 
 template <class T>

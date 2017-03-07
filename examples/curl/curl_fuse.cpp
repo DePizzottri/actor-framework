@@ -1,4 +1,4 @@
-/******************************************************************************\
+/******************************************************************************
  * This example                                                               *
  * - emulates a client launching a request every 10-300ms                     *
  * - uses a CURL-backend consisting of a master and 10 workers                *
@@ -28,12 +28,12 @@
  *          |                                     |<--/                       *
  *          | <-------------(reply)-------------- |                           *
  *          X                                                                 *
-\ ******************************************************************************/
+ ******************************************************************************/
 
 // C includes
-#include <time.h>
-#include <signal.h>
-#include <stdlib.h>
+#include <ctime>
+#include <csignal>
+#include <cstdlib>
 
 // C++ includes
 #include <string>
@@ -112,10 +112,11 @@ struct base_state {
     return aout(self) << color << name << " (id = " << self->id() << "): ";
   }
 
-  virtual void init(std::string m_name, std::string m_color) {
+  virtual bool init(std::string m_name, std::string m_color) {
     name = std::move(m_name);
     color = std::move(m_color);
     print() << "started" << color::reset_endl;
+    return true;
   }
 
   virtual ~base_state() {
@@ -128,8 +129,9 @@ struct base_state {
 };
 
 // encapsulates an HTTP request
-behavior client_job(stateful_actor<base_state>* self, actor parent) {
-  self->state.init("client-job", color::blue);
+behavior client_job(stateful_actor<base_state>* self, const actor& parent) {
+  if (!self->state.init("client-job", color::blue))
+    return {}; // returning an empty behavior terminates the actor
   self->send(parent, read_atom::value,
              "http://www.example.com/index.html",
              uint64_t{0}, uint64_t{4095});
@@ -162,10 +164,11 @@ struct client_state : base_state {
 };
 
 // spawns HTTP requests
-behavior client(stateful_actor<client_state>* self, actor parent) {
+behavior client(stateful_actor<client_state>* self, const actor& parent) {
   using std::chrono::milliseconds;
   self->link_to(parent);
-  self->state.init("client", color::green);
+  if (!self->state.init("client", color::green))
+    return {}; // returning an empty behavior terminates the actor
   self->send(self, next_atom::value);
   return {
     [=](next_atom) {
@@ -187,8 +190,8 @@ struct curl_state : base_state {
     // nop
   }
 
-  ~curl_state() {
-    if (curl)
+  ~curl_state() override {
+    if (curl != nullptr)
       curl_easy_cleanup(curl);
   }
 
@@ -201,13 +204,13 @@ struct curl_state : base_state {
     return size;
   }
 
-  void init(std::string m_name, std::string m_color) override {
+  bool init(std::string m_name, std::string m_color) override {
     curl = curl_easy_init();
-    if (! curl)
-      throw std::runtime_error("Unable initialize CURL.");
+    if (curl == nullptr)
+      return false;
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &curl_state::callback);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1);
-    base_state::init(std::move(m_name), std::move(m_color));
+    return base_state::init(std::move(m_name), std::move(m_color));
   }
 
   CURL*       curl = nullptr;
@@ -215,8 +218,9 @@ struct curl_state : base_state {
 };
 
 // manages a CURL session
-behavior curl_worker(stateful_actor<curl_state>* self, actor parent) {
-  self->state.init("curl-worker", color::yellow);
+behavior curl_worker(stateful_actor<curl_state>* self, const actor& parent) {
+  if (!self->state.init("curl-worker", color::yellow))
+    return {}; // returning an empty behavior terminates the actor
   return {
     [=](read_atom, const std::string& fname, uint64_t offset, uint64_t range)
     -> message {
@@ -282,7 +286,8 @@ struct master_state : base_state {
 };
 
 behavior curl_master(stateful_actor<master_state>* self) {
-  self->state.init("curl-master", color::magenta);
+  if (!self->state.init("curl-master", color::magenta))
+    return {}; // returning an empty behavior terminates the actor
   // spawn workers
   for(size_t i = 0; i < num_curl_workers; ++i)
     self->state.idle.push_back(self->spawn<detached+linked>(curl_worker, self));
@@ -335,7 +340,7 @@ void caf_main(actor_system& system) {
   struct sigaction act;
   act.sa_handler = [](int) { shutdown_flag = true; };
   auto set_sighandler = [&] {
-    if (sigaction(SIGINT, &act, 0)) {
+    if (sigaction(SIGINT, &act, nullptr) != 0) {
       std::cerr << "fatal: cannot set signal handler" << std::endl;
       abort();
     }
@@ -349,7 +354,7 @@ void caf_main(actor_system& system) {
   auto master = self->spawn<detached>(curl_master);
   self->spawn<detached>(client, master);
   // poll CTRL+C flag every second
-  while (! shutdown_flag)
+  while (!shutdown_flag)
     std::this_thread::sleep_for(std::chrono::seconds(1));
   aout(self) << color::cyan << "received CTRL+C" << color::reset_endl;
   // shutdown actors

@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -48,13 +48,13 @@ using class1ptr = intrusive_ptr<class1>;
 class class0 : public ref_counted {
 public:
   explicit class0(bool subtype = false) : subtype_(subtype) {
-    if (! subtype) {
+    if (!subtype) {
       ++class0_instances;
     }
   }
 
-  ~class0() {
-    if (! subtype_) {
+  ~class0() override {
+    if (!subtype_) {
       --class0_instances;
     }
   }
@@ -77,7 +77,7 @@ public:
     ++class1_instances;
   }
 
-  ~class1() {
+  ~class1() override {
     --class1_instances;
   }
 

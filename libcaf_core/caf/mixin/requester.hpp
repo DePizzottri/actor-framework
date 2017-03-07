@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -27,6 +27,8 @@
 #include "caf/actor.hpp"
 #include "caf/message.hpp"
 #include "caf/duration.hpp"
+#include "caf/message_id.hpp"
+#include "caf/response_type.hpp"
 #include "caf/response_handle.hpp"
 #include "caf/message_priority.hpp"
 #include "caf/check_typed_input.hpp"
@@ -62,13 +64,11 @@ public:
   template <message_priority P = message_priority::normal,
             class Handle = actor, class... Ts>
   response_handle<Subtype,
-                  typename detail::deduce_output_type<
-                    Handle,
-                    detail::type_list<
-                      typename detail::implicit_conversions<
-                        typename std::decay<Ts>::type
-                      >::type...>
-                  >::type,
+                  response_type_t<
+                    typename Handle::signatures,
+                    typename detail::implicit_conversions<
+                      typename std::decay<Ts>::type
+                    >::type...>,
                   is_blocking_requester<Subtype>::value>
   request(const Handle& dest, const duration& timeout, Ts&&... xs) {
     static_assert(sizeof...(Ts) > 0, "no message to send");
@@ -77,14 +77,38 @@ public:
         typename detail::implicit_conversions<
           typename std::decay<Ts>::type
         >::type...>;
-    static_assert(actor_accepts_message<typename signatures_of<Handle>::type, token>::value,
+    static_assert(response_type_unbox<signatures_of_t<Handle>, token>::valid,
                   "receiver does not accept given message");
     auto dptr = static_cast<Subtype*>(this);
     auto req_id = dptr->new_request_id(P);
-    dest->eq_impl(req_id, dptr->ctrl(), dptr->context(),
-                  std::forward<Ts>(xs)...);
-    dptr->request_response_timeout(timeout, req_id);
+    if (dest) {
+      dest->eq_impl(req_id, dptr->ctrl(), dptr->context(),
+                    std::forward<Ts>(xs)...);
+      dptr->request_response_timeout(timeout, req_id);
+    } else {
+      dptr->eq_impl(req_id.response_id(), dptr->ctrl(), dptr->context(),
+                    make_error(sec::invalid_argument));
+    }
     return {req_id.response_id(), dptr};
+   }
+
+  /// Sends `{xs...}` as a synchronous message to `dest` with priority `mp`.
+  /// @returns A handle identifying a future-like handle to the response.
+  /// @warning The returned handle is actor specific and the response to the
+  ///          sent message cannot be received by another actor.
+  template <message_priority P = message_priority::normal,
+            class Rep = int, class Period = std::ratio<1>,
+            class Handle = actor, class... Ts>
+  response_handle<Subtype,
+                  response_type_t<
+                    typename Handle::signatures,
+                    typename detail::implicit_conversions<
+                      typename std::decay<Ts>::type
+                    >::type...>,
+                  is_blocking_requester<Subtype>::value>
+  request(const Handle& dest, std::chrono::duration<Rep, Period> timeout,
+          Ts&&... xs) {
+    return request(dest, duration{timeout}, std::forward<Ts>(xs)...);
   }
 };
 

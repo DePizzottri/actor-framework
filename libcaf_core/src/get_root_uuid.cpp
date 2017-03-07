@@ -5,7 +5,7 @@
  *                     | |___ / ___ \|  _|      Framework                     *
  *                      \____/_/   \_|_|                                      *
  *                                                                            *
- * Copyright (C) 2011 - 2015                                                  *
+ * Copyright (C) 2011 - 2016                                                  *
  * Dominik Charousset <dominik.charousset (at) haw-hamburg.de>                *
  *                                                                            *
  * Distributed under the terms and conditions of the BSD 3-Clause License or  *
@@ -31,7 +31,7 @@ constexpr char uuid_format[] = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF";
 namespace {
 
 inline void erase_trailing_newline(std::string& str) {
-  while (! str.empty() && (*str.rbegin()) == '\n') {
+  while (!str.empty() && (*str.rbegin()) == '\n') {
     str.resize(str.size() - 1);
   }
 }
@@ -50,7 +50,7 @@ std::string get_root_uuid() {
   // fetch hd serial
   std::string uuid;
   FILE* get_uuid_cmd = popen(s_get_uuid, "r");
-  while (fgets(cbuf, 100, get_uuid_cmd) != 0) {
+  while (fgets(cbuf, 100, get_uuid_cmd) != nullptr) {
     uuid += cbuf;
   }
   pclose(get_uuid_cmd);
@@ -61,7 +61,7 @@ std::string get_root_uuid() {
 } // namespace detail
 } // namespace caf
 
-#elif defined(CAF_LINUX) || defined(CAF_BSD)
+#elif defined(CAF_LINUX) || defined(CAF_BSD) || defined(CAF_CYGWIN)
 
 #include <vector>
 #include <string>
@@ -93,7 +93,7 @@ struct columns_iterator : std::iterator<std::forward_iterator_tag,
   }
   columns_iterator& operator++() {
     string line;
-    if (! std::getline(*fs, line)) {
+    if (!std::getline(*fs, line)) {
       fs = nullptr;
     } else {
       split(cols, line, is_any_of(" "), token_compress_on);
