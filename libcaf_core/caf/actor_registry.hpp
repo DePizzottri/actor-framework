@@ -84,6 +84,15 @@ public:
 
   name_map named_actors() const;
 
+  /// Associates given actor to name
+  void put(std::string const& name, strong_actor_ptr val);
+
+  /// Returns the actor associated with name or `invalid_actor`.
+  strong_actor_ptr get(std::string const& name) const;
+
+  /// Removes actor with name
+  void erase(std::string const& name);
+
 private:
   // Starts this component.
   void start();
@@ -104,6 +113,11 @@ private:
 
   name_map named_entries_;
   mutable detail::shared_spinlock named_entries_mtx_;
+
+  using actors = std::unordered_map<std::string, strong_actor_ptr>;
+
+  actors actors_;
+  mutable detail::shared_spinlock actors_mtx_;
 
   actor_system& system_;
 };

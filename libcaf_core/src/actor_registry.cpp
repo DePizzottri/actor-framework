@@ -154,4 +154,27 @@ void actor_registry::stop() {
   // nop
 }
 
+void actor_registry::put(std::string const& name, strong_actor_ptr value) {
+  if (value) {
+    value->get()->attach_functor([=] {
+      system_.registry().put(name, nullptr);
+    });
+  }
+  exclusive_guard guard{ actors_mtx_ };
+  actors_.emplace(name, std::move(value));
+}
+
+strong_actor_ptr actor_registry::get(std::string const& name) const {
+  shared_guard guard{ actors_mtx_ };
+  auto i = actors_.find(name);
+  if (i == actors_.end())
+      return nullptr;
+  return i->second;
+}
+
+void actor_registry::erase(std::string const& name) {
+  exclusive_guard guard{ actors_mtx_ };
+  actors_.erase(name);
+}
+
 } // namespace caf
